@@ -97,6 +97,15 @@ button:disabled {
   overflow: auto;
 }
 
+.code-list {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  font-family: "SFMono-Regular", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+
 .images-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -130,6 +139,12 @@ button:disabled {
 .ocr pre {
   margin-top: 8px;
   background: #fff;
+}
+
+.image-upc {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .copy-button {

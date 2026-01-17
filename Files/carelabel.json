@@ -1,0 +1,59 @@
+[
+    {
+      "page": 1,
+      "parent_information": {
+        "job_reference": "R-250848B1",
+        "reference_number": "GENA30110",
+        "date": "11.10.25",
+        "style_number": "AV27HQ263268",
+        "product_description": "AVIA",
+        "color": "BLACK SOOT",
+        "dimensions": "28 x 78.5 mm",
+        "vendor": "r-pac International Corporation",
+        "country_of_origin": "Made In/Hecho En Vietnam",
+        "material_composition": {
+          "body_and_pocket_bags": "82% Recycled Polyester, 14% Spandex, 4% Polyester",
+          "shelf_bra_interior": "88% Polyester, 12% Spandex",
+          "inner_layer_mesh": "88% Polyester, 12% Spandex"
+        },
+        "rn_number": "52469"
+      },
+      "products": [
+        {
+          "size": "XS",
+          "size_range": "0-2",
+          "upc_code": "198854413623"
+        },
+        {
+          "size": "S",
+          "size_range": "4-6",
+          "upc_code": "198854413630"
+        },
+        {
+          "size": "M",
+          "size_range": "8-10",
+          "upc_code": "198854413647"
+        },
+        {
+          "size": "L",
+          "size_range": "12-14",
+          "upc_code": "198854413654"
+        },
+        {
+          "size": "XL",
+          "size_range": "16-18",
+          "upc_code": "198854413661"
+        },
+        {
+          "size": "XXL",
+          "size_range": "20",
+          "upc_code": "198854413678"
+        },
+        {
+          "size": "XXXL",
+          "size_range": "22",
+          "upc_code": "198854413685"
+        }
+      ]
+    }
+  ]

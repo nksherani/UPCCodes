@@ -1,0 +1,102 @@
+[
+    {
+      "page": 1,
+      "parent_information": {
+        "job_reference": "R-250848C",
+        "reference_number": "AVMU50506-RFID",
+        "date": "11.12.25",
+        "style_number": "AV27HQ263268",
+        "product_description": "AVIA STRETCH WOVEN DRESS",
+        "material_composition": "82% Recycled Polyester Body",
+        "dimensions": "2.5\"x8\"",
+        "vendor": "r-pac International Corporation"
+      },
+      "products": [
+        {
+          "size": "XS",
+          "size_range": "0-2",
+          "upc_code": "198354413622"
+        },
+        {
+          "size": "S",
+          "size_range": "4-6",
+          "upc_code": "198354413639"
+        },
+        {
+          "size": "M",
+          "size_range": "8-10",
+          "upc_code": "198354413646"
+        },
+        {
+          "size": "L",
+          "size_range": "12-14",
+          "upc_code": "198354413653"
+        },
+        {
+          "size": "XL",
+          "size_range": "16-18",
+          "upc_code": "198354413660"
+        },
+        {
+          "size": "XXL",
+          "size_range": "20",
+          "upc_code": "198354413677"
+        },
+        {
+          "size": "XXXL",
+          "size_range": "22",
+          "upc_code": "198354413684"
+        }
+      ]
+    },
+    {
+      "page": 2,
+      "parent_information": {
+        "job_reference": "R-250848C",
+        "reference_number": "AVMU50506-RFID",
+        "date": "11.12.25",
+        "style_number": "AV27HQ263268",
+        "product_description": "AVIA STRETCH WOVEN DRESS",
+        "material_composition": "86% Recycled Polyester Body",
+        "dimensions": "2.5\"x8\"",
+        "vendor": "r-pac International Corporation"
+      },
+      "products": [
+        {
+          "size": "XS",
+          "size_range": "0-2",
+          "upc_code": "198354413691"
+        },
+        {
+          "size": "S",
+          "size_range": "4-6",
+          "upc_code": "198354413707"
+        },
+        {
+          "size": "M",
+          "size_range": "8-10",
+          "upc_code": "198354413714"
+        },
+        {
+          "size": "L",
+          "size_range": "12-14",
+          "upc_code": "198354413721"
+        },
+        {
+          "size": "XL",
+          "size_range": "16-18",
+          "upc_code": "198354413738"
+        },
+        {
+          "size": "XXL",
+          "size_range": "20",
+          "upc_code": "198354413745"
+        },
+        {
+          "size": "XXXL",
+          "size_range": "22",
+          "upc_code": "198354413752"
+        }
+      ]
+    }
+  ]

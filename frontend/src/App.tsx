@@ -11,11 +11,14 @@ type ExtractedImage = {
   ocr_text: string;
   source?: "embedded" | "page_render";
   note?: string;
+  upc_codes?: string[];
 };
 
 type ExtractResponse = {
   pdf_text: string;
   images: ExtractedImage[];
+  upc_codes?: string[];
+  pdf_text_upc_codes?: string[];
   file_name?: string;
   created_at?: string;
   id?: string;
@@ -117,6 +120,29 @@ export default function App() {
 
           <div className="panel">
             <div className="panel-header">
+              <h2>UPC Codes</h2>
+              <button
+                type="button"
+                className="copy-button"
+                onClick={() => handleCopy((result.upc_codes ?? []).join("\n"))}
+                disabled={!result.upc_codes?.length}
+              >
+                Copy
+              </button>
+            </div>
+            {result.upc_codes?.length ? (
+              <ul className="code-list">
+                {result.upc_codes.map((code) => (
+                  <li key={code}>{code}</li>
+                ))}
+              </ul>
+            ) : (
+              <p>No UPC codes detected.</p>
+            )}
+          </div>
+
+          <div className="panel">
+            <div className="panel-header">
               <h2>Extracted Text</h2>
               <button
                 type="button"
@@ -170,6 +196,32 @@ export default function App() {
                     </div>
                     <pre>{image.ocr_text || "No OCR text found."}</pre>
                   </div>
+                  {image.upc_codes?.length ? (
+                    <div className="image-upc">
+                      <div className="ocr-header">
+                        <strong>UPC Codes</strong>
+                        <button
+                          type="button"
+                          className="copy-button"
+                          onClick={() =>
+                            handleCopy(image.upc_codes?.join("\n") ?? "")
+                          }
+                        >
+                          Copy
+                        </button>
+                      </div>
+                      <ul className="code-list">
+                        {image.upc_codes.map((code) => (
+                          <li key={code}>{code}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <div className="image-upc">
+                      <strong>UPC Codes</strong>
+                      <p>No UPC codes detected.</p>
+                    </div>
+                  )}
                   {image.note && <div className="note">{image.note}</div>}
                 </div>
               ))}

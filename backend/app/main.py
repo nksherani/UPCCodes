@@ -1,5 +1,6 @@
 import base64
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from io import BytesIO
@@ -43,6 +44,37 @@ def _render_page_image(page: fitz.Page, zoom: float = 2.0) -> bytes:
     return pix.tobytes("png")
 
 
+def _normalize_text(text: str) -> str:
+    text = re.sub(r"[^\x20-\x7E]", " ", text)
+    text = re.sub(r"(\d)\s+(\d)", r"\1\2", text)
+    return text
+
+
+def _extract_upc_ean(text: str) -> list[str]:
+    normalized = _normalize_text(text)
+    pattern = re.compile(r"(?:EAN\/?UPC|EANIUPC)?\s*(\d{12,13})")
+    return pattern.findall(normalized)
+
+
+def _is_valid_upc_ean(code: str) -> bool:
+    digits = list(map(int, code))
+    check = digits.pop()
+
+    if len(code) == 12:  # UPC-A
+        total = sum(digits[i] * 3 if i % 2 == 0 else digits[i] for i in range(11))
+    elif len(code) == 13:  # EAN-13
+        total = sum(digits[i] * 3 if i % 2 == 1 else digits[i] for i in range(12))
+    else:
+        return False
+
+    return (10 - (total % 10)) % 10 == check
+
+
+def _get_valid_upc_codes(text: str) -> list[str]:
+    codes = _extract_upc_ean(text)
+    return sorted({code for code in codes if _is_valid_upc_ean(code)})
+
+
 def _extract_pdf(pdf_path: str) -> dict[str, Any]:
     doc = fitz.open(pdf_path)
     full_text_parts: list[str] = []
@@ -64,6 +96,7 @@ def _extract_pdf(pdf_path: str) -> dict[str, Any]:
             image_format = base_image.get("ext", "png")
             image = Image.open(BytesIO(img_bytes))
             ocr_text = pytesseract.image_to_string(image)
+            upc_codes = _get_valid_upc_codes(ocr_text)
 
             image_id = f"p{page_index + 1}_i{img_index}"
             images.append(
@@ -77,6 +110,7 @@ def _extract_pdf(pdf_path: str) -> dict[str, Any]:
                     "data_base64": base64.b64encode(img_bytes).decode("ascii"),
                     "ocr_text": ocr_text,
                     "source": "embedded",
+                    "upc_codes": upc_codes,
                 }
             )
             page_images_found = True
@@ -85,6 +119,7 @@ def _extract_pdf(pdf_path: str) -> dict[str, Any]:
             page_bytes = _render_page_image(page)
             image = Image.open(BytesIO(page_bytes))
             ocr_text = pytesseract.image_to_string(image)
+            upc_codes = _get_valid_upc_codes(ocr_text)
             image_id = f"p{page_index + 1}_page"
             images.append(
                 {
@@ -98,12 +133,21 @@ def _extract_pdf(pdf_path: str) -> dict[str, Any]:
                     "ocr_text": ocr_text,
                     "source": "page_render",
                     "note": "Page rendered for OCR; no embedded images found.",
+                    "upc_codes": upc_codes,
                 }
             )
 
+    pdf_text = "".join(full_text_parts)
+    pdf_text_upc_codes = _get_valid_upc_codes(pdf_text)
+    all_ocr_text = "\n".join(image["ocr_text"] for image in images)
+    ocr_upc_codes = _get_valid_upc_codes(all_ocr_text)
+    upc_codes = sorted(set(pdf_text_upc_codes + ocr_upc_codes))
+
     return {
-        "pdf_text": "".join(full_text_parts),
+        "pdf_text": pdf_text,
         "images": images,
+        "pdf_text_upc_codes": pdf_text_upc_codes,
+        "upc_codes": upc_codes,
     }
 
 
