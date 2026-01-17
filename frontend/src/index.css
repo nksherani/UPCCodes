@@ -78,6 +78,14 @@ button:disabled {
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
 }
 
+.panel-header,
+.ocr-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .panel pre {
   white-space: pre-wrap;
   word-break: break-word;
@@ -122,6 +130,20 @@ button:disabled {
 .ocr pre {
   margin-top: 8px;
   background: #fff;
+}
+
+.copy-button {
+  background: #e2e8f0;
+  color: #0f172a;
+  border: 1px solid #cbd5f5;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.copy-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .note {

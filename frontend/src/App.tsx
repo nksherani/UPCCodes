@@ -65,6 +65,17 @@ export default function App() {
     }
   };
 
+  const handleCopy = async (text: string) => {
+    if (!text) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (err) {
+      console.error("Copy failed", err);
+    }
+  };
+
   return (
     <div className="page">
       <header>
@@ -105,7 +116,17 @@ export default function App() {
           </div>
 
           <div className="panel">
-            <h2>Extracted Text</h2>
+            <div className="panel-header">
+              <h2>Extracted Text</h2>
+              <button
+                type="button"
+                className="copy-button"
+                onClick={() => handleCopy(result.pdf_text)}
+                disabled={!result.pdf_text}
+              >
+                Copy
+              </button>
+            </div>
             <pre>{result.pdf_text || "No text extracted."}</pre>
           </div>
 
@@ -136,7 +157,17 @@ export default function App() {
                     )}
                   </div>
                   <div className="ocr">
-                    <strong>OCR Text</strong>
+                    <div className="ocr-header">
+                      <strong>OCR Text</strong>
+                      <button
+                        type="button"
+                        className="copy-button"
+                        onClick={() => handleCopy(image.ocr_text)}
+                        disabled={!image.ocr_text}
+                      >
+                        Copy
+                      </button>
+                    </div>
                     <pre>{image.ocr_text || "No OCR text found."}</pre>
                   </div>
                   {image.note && <div className="note">{image.note}</div>}
