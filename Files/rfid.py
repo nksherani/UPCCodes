@@ -6,6 +6,12 @@ from pathlib import Path
 import fitz  # PyMuPDF
 from PIL import Image
 
+try:
+    from pyzbar.pyzbar import decode as zbar_decode
+except Exception as exc: 
+    print(f"pyzbar not found: {exc}")  # pragma: no cover - optional dependency
+    zbar_decode = None
+
 def _resolve_path(path_value: str) -> str:
     path = Path(path_value)
     if path.is_absolute():
@@ -40,6 +46,23 @@ def _extract_upc_ean(text: str) -> str:
         return ""
     code = match.group(1)
     return code if _is_valid_upc_ean(code) else ""
+
+
+def _decode_barcodes(image: Image.Image) -> list[str]:
+    if zbar_decode is None:
+        return []
+    decoded = zbar_decode(image)
+    values: list[str] = []
+    for item in decoded:
+        try:
+            value = item.data.decode("utf-8").strip()
+            print(f"Decoded barcode: {value}")
+        except Exception:
+            print(f"Error decoding barcode: {e}")
+            continue
+        if value:
+            values.append(value)
+    return values
 
 
 def extract_parent_info(pdf_path):
@@ -256,7 +279,7 @@ def crop_hang_tags(
                     )
 
                 tag_text = page.get_text("text", clip=render_rect)
-                tag_info = extract_tag_info(tag_text)
+                tag_info = extract_tag_info(tag_text, tag_img)
 
                 size = tag_info.get('size', f'tag{i}')
                 color = tag_info.get('color', '').replace(' ', '_') or "unknown"
@@ -276,7 +299,7 @@ def crop_hang_tags(
     doc.close()
     return hang_tags
 
-def extract_tag_info(text):
+def extract_tag_info(text, tag_image: Image.Image | None = None):
     """Extract information from individual hang tag text"""
     info = {}
     normalized = _normalize_text(text)
@@ -291,6 +314,10 @@ def extract_tag_info(text):
     upc = _extract_upc_ean(normalized)
     if upc:
         info['upc'] = upc
+    if tag_image is not None:
+        barcodes = _decode_barcodes(tag_image)
+        if barcodes:
+            info['barcode'] = barcodes[0]
     
     # Extract color
     color_match = re.search(r'(BLACK SOOT|SALSA DELIGHT)', normalized)
