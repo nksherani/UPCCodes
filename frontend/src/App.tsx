@@ -1,234 +1,460 @@
 import { useMemo, useState } from "react";
+import * as XLSX from "xlsx";
+import * as XLSXStyle from "xlsx-js-style";
+import { extractFiles } from "./api";
 
-type ExtractedImage = {
-  image_id: string;
-  page: number;
-  index: number;
-  format: string;
-  width: number;
-  height: number;
-  data_base64: string;
-  ocr_text: string;
-  source?: "embedded" | "page_render";
-  note?: string;
-  upc_codes?: string[];
+type ExtractState = {
+  loading: boolean;
+  error: string;
+  data: null | Awaited<ReturnType<typeof extractFiles>>;
 };
 
-type ExtractResponse = {
-  pdf_text: string;
-  images: ExtractedImage[];
-  upc_codes?: string[];
-  pdf_text_upc_codes?: string[];
-  file_name?: string;
-  created_at?: string;
-  id?: string;
+type ItemRow = {
+  type: string;
+  style_number?: string;
+  size?: string;
+  color?: string;
+  upc?: string;
+  [key: string]: unknown;
 };
-
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 export default function App() {
-  const [file, setFile] = useState<File | null>(null);
-  const [result, setResult] = useState<ExtractResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [pdfFiles, setPdfFiles] = useState<FileList | null>(null);
+  const [sheetPreview, setSheetPreview] = useState<{
+    headers: string[];
+    rows: string[][];
+  } | null>(null);
+  const [sheetError, setSheetError] = useState("");
+  const [extractState, setExtractState] = useState<ExtractState>({
+    loading: false,
+    error: "",
+    data: null,
+  });
 
-  const totalImages = useMemo(() => result?.images.length ?? 0, [result]);
+  const mergedItems: ItemRow[] =
+    extractState.data
+      ? [
+          ...extractState.data.care_labels.map((item) => ({
+            type: "Care Label",
+            ...item,
+          })),
+          ...extractState.data.hang_tags.map((item) => ({
+            type: "Hang Tag",
+            ...item,
+          })),
+        ].map((item) => item as ItemRow)
+      : [];
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!file) {
-      setError("Please choose a PDF file.");
+  const handleExtract = async () => {
+    if (!pdfFiles || pdfFiles.length === 0) {
+      setExtractState({ loading: false, error: "Select PDF files first.", data: null });
       return;
     }
-
-    setLoading(true);
-    setError(null);
-    setResult(null);
-
-    const formData = new FormData();
-    formData.append("file", file);
-
+    setExtractState({ loading: true, error: "", data: null });
     try {
-      const response = await fetch(`${API_URL}/extract`, {
-        method: "POST",
-        body: formData,
+      const data = await extractFiles(pdfFiles);
+      setExtractState({ loading: false, error: "", data });
+    } catch (error) {
+      setExtractState({
+        loading: false,
+        error: error instanceof Error ? error.message : "Failed to extract.",
+        data: null,
       });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.detail ?? "Upload failed.");
-      }
-
-      const data = (await response.json()) as ExtractResponse;
-      setResult(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unexpected error.");
-    } finally {
-      setLoading(false);
     }
   };
 
-  const handleCopy = async (text: string) => {
-    if (!text) {
+  const handleSheetChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    setSheetPreview(null);
+    setSheetError("");
+    if (!file) {
       return;
     }
     try {
-      await navigator.clipboard.writeText(text);
-    } catch (err) {
-      console.error("Copy failed", err);
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: "array" });
+      const sheetName = workbook.SheetNames[0];
+      if (!sheetName) {
+        setSheetError("Spreadsheet has no sheets.");
+        return;
+      }
+      const sheet = workbook.Sheets[sheetName];
+      const range = XLSX.utils.decode_range(sheet["!ref"] ?? "A1:A1");
+      const formatCell = (rowIndex: number, colIndex: number) => {
+        const cell = sheet[XLSX.utils.encode_cell({ r: rowIndex, c: colIndex })];
+        if (!cell) {
+          return "";
+        }
+        if (cell.t === "n" && typeof cell.v === "number") {
+          return Math.trunc(cell.v).toString();
+        }
+        return XLSX.utils.format_cell(cell);
+      };
+
+      if (range.e.r < range.s.r) {
+        setSheetError("Spreadsheet is empty.");
+        return;
+      }
+
+      const headers = Array.from(
+        { length: range.e.c - range.s.c + 1 },
+        (_, index) => formatCell(range.s.r, range.s.c + index).trim()
+      );
+      const normalizedRows: string[][] = [];
+      for (let r = range.s.r + 1; r <= range.e.r; r += 1) {
+        const row = headers.map((_, index) =>
+          formatCell(r, range.s.c + index).trim()
+        );
+        if (row.some((cell) => cell)) {
+          normalizedRows.push(row);
+        }
+      }
+      setSheetPreview({ headers, rows: normalizedRows.slice(0, 50) });
+    } catch (error) {
+      setSheetError(error instanceof Error ? error.message : "Failed to read spreadsheet.");
     }
+  };
+
+  const sheetIndices = useMemo(() => {
+    if (!sheetPreview) {
+      return { upc: -1, size: -1, color: -1 };
+    }
+    const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const headers = sheetPreview.headers.map(normalize);
+    const findIndex = (candidates: string[]) =>
+      headers.findIndex((header) => candidates.some((candidate) => header.includes(candidate)));
+    return {
+      upc: findIndex(["carelabelupc", "careupc", "hangtagupc", "rfidupc", "upc"]),
+      size: findIndex(["size"]),
+      color: findIndex(["color"]),
+    };
+  }, [sheetPreview]);
+
+  const sheetRowsNormalized = useMemo(() => {
+    if (!sheetPreview) {
+      return [];
+    }
+    const getCell = (row: string[], index: number) =>
+      index >= 0 ? (row[index] ?? "").trim() : "";
+    return sheetPreview.rows.map((row) => ({
+      upc: getCell(row, sheetIndices.upc),
+      size: getCell(row, sheetIndices.size).toUpperCase(),
+      color: getCell(row, sheetIndices.color).toUpperCase(),
+      row,
+    }));
+  }, [sheetPreview, sheetIndices]);
+
+  const extractedNormalized = useMemo(
+    () =>
+      mergedItems.map((item) => ({
+        upc: String(item.upc ?? ""),
+        size: String(item.size ?? "").toUpperCase(),
+        color: String(item.color ?? "").toUpperCase(),
+        item,
+      })),
+    [mergedItems]
+  );
+
+  const upcToSheetRows = useMemo(() => {
+    const map = new Map<string, typeof sheetRowsNormalized>();
+    sheetRowsNormalized.forEach((row) => {
+      if (!row.upc) {
+        return;
+      }
+      const list = map.get(row.upc) ?? [];
+      list.push(row);
+      map.set(row.upc, list);
+    });
+    return map;
+  }, [sheetRowsNormalized]);
+
+  const upcToExtracted = useMemo(() => {
+    const map = new Map<string, typeof extractedNormalized>();
+    extractedNormalized.forEach((row) => {
+      if (!row.upc) {
+        return;
+      }
+      const list = map.get(row.upc) ?? [];
+      list.push(row);
+      map.set(row.upc, list);
+    });
+    return map;
+  }, [extractedNormalized]);
+
+  const matchStatus = (
+    upc: string,
+    size: string,
+    color: string,
+    otherRows: Array<{ size: string; color: string }>
+  ) => {
+    if (!upc) {
+      return { status: "missing", sizeMatch: false, colorMatch: false };
+    }
+    if (otherRows.length === 0) {
+      return { status: "missing", sizeMatch: false, colorMatch: false };
+    }
+    const exact = otherRows.find((row) => row.size === size && row.color === color);
+    if (exact) {
+      return { status: "match", sizeMatch: true, colorMatch: true };
+    }
+    const sizeMatch = otherRows.some((row) => row.size === size);
+    const colorMatch = otherRows.some((row) => row.color === color);
+    return { status: "mismatch", sizeMatch, colorMatch };
+  };
+
+  const rowFill = (status: "missing" | "mismatch" | "match") => {
+    if (status === "match") {
+      return "E7F6EC";
+    }
+    if (status === "mismatch") {
+      return "FDE8E8";
+    }
+    return "FFF4E5";
+  };
+
+  const mismatchFill = "F9CACA";
+
+  const applyCellStyle = (worksheet: any, cellAddress: string, fillColor: string) => {
+    const cell = worksheet[cellAddress];
+    if (!cell) {
+      return;
+    }
+    cell.s = {
+      fill: {
+        fgColor: { rgb: fillColor },
+      },
+    };
+  };
+
+  const exportExtracted = () => {
+    const headers = ["Type", "Style", "Size", "Color", "UPC"];
+    const rows = mergedItems.map((item) => [
+      item.type ?? "",
+      item.style_number ?? "",
+      item.size ?? "",
+      item.color ?? "",
+      item.upc ?? "",
+    ]);
+    const sheet = XLSXStyle.utils.aoa_to_sheet([headers, ...rows]);
+    rows.forEach((row, index) => {
+      const status = matchStatus(
+        String(row[4] ?? ""),
+        String(row[2] ?? "").toUpperCase(),
+        String(row[3] ?? "").toUpperCase(),
+        upcToSheetRows.get(String(row[4] ?? "")) ?? []
+      );
+      const fill = rowFill(status.status as "missing" | "mismatch" | "match");
+      for (let c = 0; c < headers.length; c += 1) {
+        const addr = XLSXStyle.utils.encode_cell({ r: index + 1, c });
+        applyCellStyle(sheet, addr, fill);
+      }
+      if (status.status === "mismatch") {
+        if (!status.sizeMatch) {
+          applyCellStyle(sheet, XLSXStyle.utils.encode_cell({ r: index + 1, c: 2 }), mismatchFill);
+        }
+        if (!status.colorMatch) {
+          applyCellStyle(sheet, XLSXStyle.utils.encode_cell({ r: index + 1, c: 3 }), mismatchFill);
+        }
+      }
+    });
+    const workbook = XLSXStyle.utils.book_new();
+    XLSXStyle.utils.book_append_sheet(workbook, sheet, "Extracted");
+    XLSXStyle.writeFile(workbook, "extracted_items.xlsx");
+  };
+
+  const exportSpreadsheetPreview = () => {
+    if (!sheetPreview) {
+      return;
+    }
+    const headers = sheetPreview.headers;
+    const rows = sheetRowsNormalized.map((row) => row.row);
+    const sheet = XLSXStyle.utils.aoa_to_sheet([headers, ...rows]);
+    rows.forEach((row, index) => {
+      const normalized = sheetRowsNormalized[index];
+      const status = matchStatus(
+        normalized.upc,
+        normalized.size,
+        normalized.color,
+        upcToExtracted.get(normalized.upc) ?? []
+      );
+      const fill = rowFill(status.status as "missing" | "mismatch" | "match");
+      for (let c = 0; c < headers.length; c += 1) {
+        const addr = XLSXStyle.utils.encode_cell({ r: index + 1, c });
+        applyCellStyle(sheet, addr, fill);
+      }
+      if (status.status === "mismatch") {
+        if (!status.sizeMatch && sheetIndices.size >= 0) {
+          applyCellStyle(
+            sheet,
+            XLSXStyle.utils.encode_cell({ r: index + 1, c: sheetIndices.size }),
+            mismatchFill
+          );
+        }
+        if (!status.colorMatch && sheetIndices.color >= 0) {
+          applyCellStyle(
+            sheet,
+            XLSXStyle.utils.encode_cell({ r: index + 1, c: sheetIndices.color }),
+            mismatchFill
+          );
+        }
+      }
+    });
+    const workbook = XLSXStyle.utils.book_new();
+    XLSXStyle.utils.book_append_sheet(workbook, sheet, "Spreadsheet");
+    XLSXStyle.writeFile(workbook, "spreadsheet_preview.xlsx");
   };
 
   return (
-    <div className="page">
+    <div className="container">
       <header>
-        <h1>PDF Extractor</h1>
-        <p>Upload a PDF to extract text, images, and OCR results.</p>
+        <h1>UPC Validator POC</h1>
+        <p>
+          Upload care label and RFID PDFs, extract metadata, then validate against a
+          spreadsheet.
+        </p>
       </header>
 
-      <form className="upload-form" onSubmit={handleSubmit}>
+      <section className="card">
+        <h2>1. Upload PDF Files</h2>
         <input
           type="file"
           accept="application/pdf"
-          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          multiple
+          onChange={(event) => setPdfFiles(event.target.files)}
         />
-        <button type="submit" disabled={loading}>
-          {loading ? "Processing..." : "Upload PDF"}
+        <button onClick={handleExtract} disabled={extractState.loading}>
+          {extractState.loading ? "Extracting..." : "Extract Metadata"}
         </button>
-      </form>
-
-      {error && <div className="error">{error}</div>}
-
-      {result && (
-        <section className="results">
-          <div className="meta">
-            <div>
-              <strong>File:</strong> {result.file_name ?? "Unnamed"}
-            </div>
-            <div>
-              <strong>Created:</strong> {result.created_at ?? "n/a"}
-            </div>
-            <div>
-              <strong>Images:</strong> {totalImages}
-            </div>
-            {result.id && (
-              <div>
-                <strong>Mongo ID:</strong> {result.id}
-              </div>
-            )}
+        {extractState.error && <p className="error">{extractState.error}</p>}
+        {extractState.data && (
+          <div className="summary">
+            <p>
+              Care labels: {extractState.data.care_labels.length} | Hang tags:{" "}
+              {extractState.data.hang_tags.length}
+            </p>
           </div>
+        )}
+      </section>
 
-          <div className="panel">
-            <div className="panel-header">
-              <h2>UPC Codes</h2>
-              <button
-                type="button"
-                className="copy-button"
-                onClick={() => handleCopy((result.upc_codes ?? []).join("\n"))}
-                disabled={!result.upc_codes?.length}
-              >
-                Copy
-              </button>
-            </div>
-            {result.upc_codes?.length ? (
-              <ul className="code-list">
-                {result.upc_codes.map((code) => (
-                  <li key={code}>{code}</li>
-                ))}
-              </ul>
-            ) : (
-              <p>No UPC codes detected.</p>
-            )}
+      {extractState.data && (
+        <section className="card">
+          <h2>Extracted Items</h2>
+          <div className="legend">
+            <span className="legend-item row-match">Match (UPC + size + color)</span>
+            <span className="legend-item row-mismatch">Mismatch (UPC found, size/color differ)</span>
+            <span className="legend-item row-missing">Missing (UPC only in one table)</span>
           </div>
-
-          <div className="panel">
-            <div className="panel-header">
-              <h2>Extracted Text</h2>
-              <button
-                type="button"
-                className="copy-button"
-                onClick={() => handleCopy(result.pdf_text)}
-                disabled={!result.pdf_text}
-              >
-                Copy
-              </button>
-            </div>
-            <pre>{result.pdf_text || "No text extracted."}</pre>
-          </div>
-
-          <div className="panel">
-            <h2>Images + OCR</h2>
-            {result.images.length === 0 && <p>No images extracted.</p>}
-            <div className="images-grid">
-              {result.images.map((image) => (
-                <div key={image.image_id} className="image-card">
-                  <img
-                    src={`data:image/${image.format};base64,${image.data_base64}`}
-                    alt={`Page ${image.page} image ${image.index}`}
-                  />
-                  <div className="image-meta">
-                    <div>
-                      <strong>ID:</strong> {image.image_id}
-                    </div>
-                    <div>
-                      <strong>Page:</strong> {image.page}
-                    </div>
-                    <div>
-                      <strong>Size:</strong> {image.width}x{image.height}
-                    </div>
-                    {image.source && (
-                      <div>
-                        <strong>Source:</strong> {image.source}
-                      </div>
-                    )}
-                  </div>
-                  <div className="ocr">
-                    <div className="ocr-header">
-                      <strong>OCR Text</strong>
-                      <button
-                        type="button"
-                        className="copy-button"
-                        onClick={() => handleCopy(image.ocr_text)}
-                        disabled={!image.ocr_text}
-                      >
-                        Copy
-                      </button>
-                    </div>
-                    <pre>{image.ocr_text || "No OCR text found."}</pre>
-                  </div>
-                  {image.upc_codes?.length ? (
-                    <div className="image-upc">
-                      <div className="ocr-header">
-                        <strong>UPC Codes</strong>
-                        <button
-                          type="button"
-                          className="copy-button"
-                          onClick={() =>
-                            handleCopy(image.upc_codes?.join("\n") ?? "")
-                          }
-                        >
-                          Copy
-                        </button>
-                      </div>
-                      <ul className="code-list">
-                        {image.upc_codes.map((code) => (
-                          <li key={code}>{code}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : (
-                    <div className="image-upc">
-                      <strong>UPC Codes</strong>
-                      <p>No UPC codes detected.</p>
-                    </div>
-                  )}
-                  {image.note && <div className="note">{image.note}</div>}
-                </div>
-              ))}
-            </div>
+          <button type="button" onClick={exportExtracted} className="secondary-button">
+            Export Extracted Items
+          </button>
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Style</th>
+                  <th>Size</th>
+                  <th>Color</th>
+                  <th>UPC</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mergedItems.map((item, index) => {
+                  const status = matchStatus(
+                    String(item.upc ?? ""),
+                    String(item.size ?? "").toUpperCase(),
+                    String(item.color ?? "").toUpperCase(),
+                    upcToSheetRows.get(String(item.upc ?? "")) ?? []
+                  );
+                  return (
+                    <tr key={`${item.type}-${index}`} className={`row-${status.status}`}>
+                    <td>{item.type}</td>
+                    <td>{item.style_number as string}</td>
+                    <td
+                      className={
+                        status.status === "mismatch" && !status.sizeMatch ? "cell-mismatch" : ""
+                      }
+                    >
+                      {item.size as string}
+                    </td>
+                    <td
+                      className={
+                        status.status === "mismatch" && !status.colorMatch ? "cell-mismatch" : ""
+                      }
+                    >
+                      {item.color as string}
+                    </td>
+                    <td>{item.upc as string}</td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </section>
       )}
+
+      <section className="card">
+        <h2>2. Upload Spreadsheet</h2>
+        <div className="legend">
+          <span className="legend-item row-match">Match (UPC + size + color)</span>
+          <span className="legend-item row-mismatch">Mismatch (UPC found, size/color differ)</span>
+          <span className="legend-item row-missing">Missing (UPC only in one table)</span>
+        </div>
+        <input
+          type="file"
+          accept=".xlsx,.xls"
+          onChange={handleSheetChange}
+        />
+        {sheetPreview && (
+          <button type="button" onClick={exportSpreadsheetPreview} className="secondary-button">
+            Export Spreadsheet
+          </button>
+        )}
+        {sheetError && <p className="error">{sheetError}</p>}
+        {sheetPreview && (
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  {sheetPreview.headers.map((header, index) => (
+                    <th key={`${header}-${index}`}>{header}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sheetRowsNormalized.map((row, rowIndex) => {
+                  const status = matchStatus(
+                    row.upc,
+                    row.size,
+                    row.color,
+                    upcToExtracted.get(row.upc) ?? []
+                  );
+                  return (
+                    <tr key={`row-${rowIndex}`} className={`row-${status.status}`}>
+                      {row.row.map((cell, cellIndex) => {
+                        const isSize = cellIndex === sheetIndices.size;
+                        const isColor = cellIndex === sheetIndices.color;
+                        const mismatch =
+                          status.status === "mismatch" &&
+                          ((isSize && !status.sizeMatch) || (isColor && !status.colorMatch));
+                        return (
+                          <td
+                            key={`cell-${rowIndex}-${cellIndex}`}
+                            className={mismatch ? "cell-mismatch" : ""}
+                          >
+                            {cell}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   );
 }

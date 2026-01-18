@@ -1,17 +1,20 @@
-[project]
-name = "pdf-extractor-api"
-version = "0.1.0"
-description = "FastAPI service for PDF text/image extraction and OCR."
-readme = "README.md"
-requires-python = ">=3.10"
-dependencies = [
-  "fastapi>=0.110",
-  "uvicorn>=0.24",
-  "python-multipart>=0.0.9",
-  "pymupdf>=1.23",
-  "pillow>=10.0",
-  "pytesseract>=0.3.10",
-  "pymongo>=4.6",
-  "python-dotenv>=1.0",
+ [project]
+ name = "upc-validator"
+ version = "0.1.0"
+ description = "UPC validation API for care labels and RFID hang tags"
+ requires-python = ">=3.11"
+ dependencies = [
+   "fastapi>=0.110",
+   "uvicorn>=0.23",
+   "python-multipart>=0.0.9",
+   "pymupdf>=1.23",
+   "pillow>=10.0",
+   "pytesseract>=0.3.10",
+  "pyzbar>=0.1.9",
+   "pandas>=2.1",
+   "openpyxl>=3.1",
+   "pyzbar>=0.1.9",
 ]
-
+ 
+ [tool.uv]
+ dev-dependencies = []

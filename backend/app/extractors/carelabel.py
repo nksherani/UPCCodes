@@ -1,3 +1,4 @@
+import os
 import re
 from typing import Any
 
@@ -21,6 +22,19 @@ def _extract_size(normalized: str) -> tuple[str, str]:
         if range_match:
             size_range = range_match.group(1)
         return size_match.group(1), size_range
+    range_match = re.search(r"\b(\d{1,2}\s*-\s*\d{1,2}|\d{1,2})\b", normalized)
+    if range_match:
+        size_range = range_match.group(1).replace(" ", "")
+        range_map = {
+            "0-2": "XS",
+            "4-6": "S",
+            "8-10": "M",
+            "12-14": "L",
+            "16-18": "XL",
+            "20": "XXL",
+            "22": "XXXL",
+        }
+        return range_map.get(size_range, ""), size_range
     return "", ""
 
 
@@ -123,11 +137,15 @@ def extract_care_labels(
     columns: int = 8,
     skip_first_column: bool = True,
     zoom: float = 3.0,
-    column_width: float | None = None,
-    left_offset: float = 55.0,
+    column_width: float = 88.0,
+    left_offset: float = 45.0,
     top_ratio: float = 0.22,
     bottom_ratio: float = 0.61,
+    output_dir: str | None = None,
 ) -> dict[str, Any]:
+    if output_dir is None:
+        output_dir = os.path.join(os.getcwd(), "output", "care_labels")
+    os.makedirs(output_dir, exist_ok=True)
     doc = fitz.open(pdf_path)
     mat = fitz.Matrix(zoom, zoom)
     labels: list[dict[str, Any]] = []
@@ -154,6 +172,9 @@ def extract_care_labels(
             pix = page.get_pixmap(matrix=mat, clip=clip_rect)
             mode = "RGBA" if pix.alpha else "RGB"
             img = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
+            filename = f"page{page_num + 1}_label{i}.png"
+            image_path = os.path.join(output_dir, filename)
+            img.save(image_path, "PNG")
 
             label_text = page.get_text("text", clip=clip_rect) or ""
             ocr_text = ocr_image(img) if len(label_text.strip()) < 20 else ""
@@ -162,6 +183,7 @@ def extract_care_labels(
             label_info = extract_care_label_info(combined_text)
             label_info["page"] = page_num + 1
             label_info["position"] = i
+            label_info["image_path"] = image_path
             labels.append(label_info)
 
     doc.close()

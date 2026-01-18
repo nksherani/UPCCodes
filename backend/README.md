@@ -1,31 +1,19 @@
-# PDF Extractor API
+# UPC Validator Backend
 
-FastAPI service that accepts a PDF, extracts text and embedded images, then OCRs each image and returns the results.
-
-## Requirements
-
-- Python 3.10+
-- Tesseract OCR installed and available on PATH
-  - macOS: `brew install tesseract`
-
-## Install (uv)
+## Setup
 
 ```bash
-cd /Users/naveed/repos/UPCCodes/backend
-uv venv
-uv pip install -e .
+cd upc-validator/backend
+uv sync
 ```
 
 ## Run
 
 ```bash
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn app.main:app --reload --port 8000
 ```
 
-## Optional MongoDB
+## Endpoints
 
-Set these env vars to enable persistence:
-
-- `MONGODB_URI`
-- `MONGODB_DB` (default `pdf_extractor`)
-- `MONGODB_COLLECTION` (default `extractions`)
+- `POST /extract` with one or more PDF files (field name `files`)
+- `POST /validate` with `spreadsheet` (Excel) and `metadata_json` (JSON string)
