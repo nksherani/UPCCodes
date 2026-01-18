@@ -76,9 +76,8 @@ def main() -> None:
     column_width = 88
     # Shift the full grid from the left edge (points/pixels at 72 dpi).
     left_offset = 55
-    top_ratio = 0.0
-    bottom_ratio = 1.0
-
+    top_ratio = 0.22
+    bottom_ratio = 0.61
     split_care_labels(
         pdf_path=pdf_path,
         output_dir=output_dir,
