@@ -35,6 +35,8 @@ def _decode_barcodes(image: Image.Image) -> list[str]:
         except Exception:
             continue
         if value:
+            if len(value) > 12:
+                value = value.lstrip("0")
             values.append(value)
     if values:
         logger.info("Decoded %s barcode(s) via pyzbar.", len(values))
@@ -67,6 +69,8 @@ def _decode_barcodes(image: Image.Image) -> list[str]:
     for line in output.splitlines():
         cleaned = line.strip()
         if cleaned:
+            if len(cleaned) > 12:
+                cleaned = cleaned.lstrip("0")
             values.append(cleaned)
     if values:
         logger.info("Decoded %s barcode(s) via zbarimg.", len(values))
