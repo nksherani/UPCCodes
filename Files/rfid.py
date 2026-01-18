@@ -6,6 +6,8 @@ from pathlib import Path
 import fitz  # PyMuPDF
 from PIL import Image
 
+from pdf_classifier import classify_pdf
+
 try:
     from pyzbar.pyzbar import decode as zbar_decode
 except Exception as exc: 
@@ -345,6 +347,10 @@ def main(pdf_path, output_dir='hang_tags'):
     """Main function to extract parent info and hang tag images"""
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
+
+    classification = classify_pdf(pdf_path)
+    if classification["type"] not in {"rfid", "unknown"}:
+        print(f"Warning: expected RFID PDF, detected {classification['type']}.")
 
     print("=" * 60)
     print("EXTRACTING PARENT INFORMATION")

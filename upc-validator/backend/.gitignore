@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.python-version
+.env
+.env.*
+.venv/
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+*.log
+data/
+uploads/

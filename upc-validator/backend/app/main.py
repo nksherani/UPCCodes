@@ -1,0 +1,134 @@
+import json
+import os
+import tempfile
+from typing import Any
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.extractors.carelabel import extract_care_labels
+from app.extractors.classifier import classify_pdf
+from app.extractors.rfid import extract_hang_tags
+from app.validation import read_spreadsheet, validate_rows
+
+app = FastAPI(title="UPC Validator API", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def _save_upload(file: UploadFile) -> str:
+    suffix = ".pdf" if file.filename and file.filename.lower().endswith(".pdf") else ""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(file.file.read())
+        return tmp.name
+
+
+def _normalize_items(items: list[dict[str, Any]], parent_info: dict[str, Any]) -> list[dict[str, Any]]:
+    normalized = []
+    for item in items:
+        merged = {
+            "style_number": item.get("style_number") or parent_info.get("style_number"),
+            "size": item.get("size"),
+            "color": item.get("color") or parent_info.get("color"),
+            "upc": item.get("upc") or item.get("barcode") or item.get("upc_candidate"),
+            "raw": item,
+        }
+        normalized.append(merged)
+    return normalized
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.post("/extract")
+def extract(files: list[UploadFile] = File(...)) -> dict[str, Any]:
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided.")
+
+    care_labels: list[dict[str, Any]] = []
+    hang_tags: list[dict[str, Any]] = []
+    file_results: list[dict[str, Any]] = []
+
+    for file in files:
+        if file.content_type not in {"application/pdf", "application/x-pdf"}:
+            raise HTTPException(status_code=400, detail=f"Unsupported file: {file.filename}")
+
+        tmp_path = _save_upload(file)
+        try:
+            classification = classify_pdf(tmp_path)
+            if classification["type"] == "care_label":
+                metadata = extract_care_labels(tmp_path)
+                care_labels.extend(_normalize_items(metadata["care_labels"], metadata["parent_info"]))
+            elif classification["type"] == "rfid":
+                metadata = extract_hang_tags(tmp_path)
+                hang_tags.extend(_normalize_items(metadata["hang_tags"], metadata["parent_info"]))
+            else:
+                metadata = extract_care_labels(tmp_path)
+                if metadata["care_labels"]:
+                    care_labels.extend(_normalize_items(metadata["care_labels"], metadata["parent_info"]))
+                else:
+                    metadata = extract_hang_tags(tmp_path)
+                    hang_tags.extend(_normalize_items(metadata["hang_tags"], metadata["parent_info"]))
+            file_results.append(
+                {
+                    "file_name": file.filename,
+                    "classification": classification,
+                    "metadata": metadata,
+                }
+            )
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+    return {
+        "files": file_results,
+        "normalized": {
+            "care_labels": care_labels,
+            "hang_tags": hang_tags,
+        },
+    }
+
+
+@app.post("/validate")
+def validate(
+    spreadsheet: UploadFile = File(...),
+    metadata_json: str = Form(...),
+) -> dict[str, Any]:
+    if spreadsheet.content_type not in {
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+        "application/octet-stream",
+    }:
+        raise HTTPException(status_code=400, detail="Spreadsheet must be an Excel file.")
+
+    try:
+        metadata = json.loads(metadata_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {exc}") from exc
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        tmp.write(spreadsheet.file.read())
+        spreadsheet_path = tmp.name
+
+    try:
+        rows = read_spreadsheet(spreadsheet_path)
+    finally:
+        try:
+            os.remove(spreadsheet_path)
+        except OSError:
+            pass
+
+    care_labels = metadata.get("normalized", {}).get("care_labels", [])
+    hang_tags = metadata.get("normalized", {}).get("hang_tags", [])
+
+    return validate_rows(rows, care_labels, hang_tags)

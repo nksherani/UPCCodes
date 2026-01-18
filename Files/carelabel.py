@@ -9,6 +9,8 @@ from pathlib import Path
 import fitz  # PyMuPDF
 from PIL import Image, ImageOps
 
+from pdf_classifier import classify_pdf
+
 try:
     import pytesseract
 except Exception as exc:  # pragma: no cover - optional dependency
@@ -332,6 +334,10 @@ def main() -> None:
     left_offset = 55
     top_ratio = 0.22
     bottom_ratio = 0.61
+    classification = classify_pdf(pdf_path)
+    if classification["type"] not in {"care_label", "unknown"}:
+        print(f"Warning: expected care label PDF, detected {classification['type']}.")
+
     parent_info = extract_parent_info(pdf_path)
     labels = extract_care_labels(
         pdf_path=pdf_path,
