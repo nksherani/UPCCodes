@@ -1,4 +1,5 @@
 import { useState } from "react";
+import * as XLSX from "xlsx";
 import { extractFiles, validateSpreadsheet } from "./api";
 
 type ExtractState = {
@@ -16,6 +17,11 @@ type ValidationState = {
 export default function App() {
   const [pdfFiles, setPdfFiles] = useState<FileList | null>(null);
   const [sheetFile, setSheetFile] = useState<File | null>(null);
+  const [sheetPreview, setSheetPreview] = useState<{
+    headers: string[];
+    rows: string[][];
+  } | null>(null);
+  const [sheetError, setSheetError] = useState("");
   const [extractState, setExtractState] = useState<ExtractState>({
     loading: false,
     error: "",
@@ -78,6 +84,59 @@ export default function App() {
         error: error instanceof Error ? error.message : "Validation failed.",
         data: null,
       });
+    }
+  };
+
+  const handleSheetChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    setSheetFile(file);
+    setSheetPreview(null);
+    setSheetError("");
+    if (!file) {
+      return;
+    }
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: "array" });
+      const sheetName = workbook.SheetNames[0];
+      if (!sheetName) {
+        setSheetError("Spreadsheet has no sheets.");
+        return;
+      }
+      const sheet = workbook.Sheets[sheetName];
+      const range = XLSX.utils.decode_range(sheet["!ref"] ?? "A1:A1");
+      const formatCell = (rowIndex: number, colIndex: number) => {
+        const cell = sheet[XLSX.utils.encode_cell({ r: rowIndex, c: colIndex })];
+        if (!cell) {
+          return "";
+        }
+        if (cell.t === "n" && typeof cell.v === "number") {
+          return Math.trunc(cell.v).toString();
+        }
+        return XLSX.utils.format_cell(cell);
+      };
+
+      if (range.e.r < range.s.r) {
+        setSheetError("Spreadsheet is empty.");
+        return;
+      }
+
+      const headers = Array.from(
+        { length: range.e.c - range.s.c + 1 },
+        (_, index) => formatCell(range.s.r, range.s.c + index).trim()
+      );
+      const normalizedRows: string[][] = [];
+      for (let r = range.s.r + 1; r <= range.e.r; r += 1) {
+        const row = headers.map((_, index) =>
+          formatCell(r, range.s.c + index).trim()
+        );
+        if (row.some((cell) => cell)) {
+          normalizedRows.push(row);
+        }
+      }
+      setSheetPreview({ headers, rows: normalizedRows.slice(0, 50) });
+    } catch (error) {
+      setSheetError(error instanceof Error ? error.message : "Failed to read spreadsheet.");
     }
   };
 
@@ -148,8 +207,31 @@ export default function App() {
         <input
           type="file"
           accept=".xlsx,.xls"
-          onChange={(event) => setSheetFile(event.target.files?.[0] ?? null)}
+          onChange={handleSheetChange}
         />
+        {sheetError && <p className="error">{sheetError}</p>}
+        {sheetPreview && (
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  {sheetPreview.headers.map((header, index) => (
+                    <th key={`${header}-${index}`}>{header}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sheetPreview.rows.map((row, rowIndex) => (
+                  <tr key={`row-${rowIndex}`}>
+                    {row.map((cell, cellIndex) => (
+                      <td key={`cell-${rowIndex}-${cellIndex}`}>{cell}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
         <button onClick={handleValidate} disabled={validationState.loading}>
           {validationState.loading ? "Validating..." : "Validate UPCs"}
         </button>
