@@ -76,6 +76,8 @@ def extract_upc_candidate(text: str) -> str:
     if not match:
         return ""
     digits = re.sub(r"\s+", "", match.group(1))
+    if len(digits) > 12:
+        digits = digits.lstrip("0")
     return digits if len(digits) in (12, 13) else ""
 
 
@@ -83,6 +85,8 @@ def extract_valid_upc(text: str) -> str:
     candidate = extract_upc_candidate(text)
     if not candidate:
         return ""
+    if len(candidate) > 12:
+        candidate = candidate.lstrip("0")
     return candidate if is_valid_upc_ean(candidate) else ""
 
 

@@ -32,12 +32,14 @@ def _save_upload(file: UploadFile) -> str:
 def _normalize_items(items: list[dict[str, Any]], parent_info: dict[str, Any]) -> list[dict[str, Any]]:
     normalized = []
     for item in items:
+        raw_item = dict(item)
+        raw_item.pop("composition", None)
         merged = {
             "style_number": item.get("style_number") or parent_info.get("style_number"),
             "size": item.get("size"),
             "color": item.get("color") or parent_info.get("color"),
             "upc": item.get("upc") or item.get("barcode") or item.get("upc_candidate"),
-            "raw": item,
+            "raw": raw_item,
         }
         normalized.append(merged)
     return normalized
@@ -55,7 +57,6 @@ def extract(files: list[UploadFile] = File(...)) -> dict[str, Any]:
 
     care_labels: list[dict[str, Any]] = []
     hang_tags: list[dict[str, Any]] = []
-    file_results: list[dict[str, Any]] = []
 
     for file in files:
         if file.content_type not in {"application/pdf", "application/x-pdf"}:
@@ -77,13 +78,6 @@ def extract(files: list[UploadFile] = File(...)) -> dict[str, Any]:
                 else:
                     metadata = extract_hang_tags(tmp_path)
                     hang_tags.extend(_normalize_items(metadata["hang_tags"], metadata["parent_info"]))
-            file_results.append(
-                {
-                    "file_name": file.filename,
-                    "classification": classification,
-                    "metadata": metadata,
-                }
-            )
         finally:
             try:
                 os.remove(tmp_path)
@@ -91,11 +85,8 @@ def extract(files: list[UploadFile] = File(...)) -> dict[str, Any]:
                 pass
 
     return {
-        "files": file_results,
-        "normalized": {
-            "care_labels": care_labels,
-            "hang_tags": hang_tags,
-        },
+        "care_labels": care_labels,
+        "hang_tags": hang_tags,
     }
 
 
@@ -128,7 +119,7 @@ def validate(
         except OSError:
             pass
 
-    care_labels = metadata.get("normalized", {}).get("care_labels", [])
-    hang_tags = metadata.get("normalized", {}).get("hang_tags", [])
+    care_labels = metadata.get("care_labels", [])
+    hang_tags = metadata.get("hang_tags", [])
 
     return validate_rows(rows, care_labels, hang_tags)

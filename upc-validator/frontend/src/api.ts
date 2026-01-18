@@ -1,18 +1,6 @@
 export type ExtractResponse = {
-  files: Array<{
-    file_name: string;
-    classification: {
-      type: string;
-      care_score: number;
-      rfid_score: number;
-      evidence: Record<string, string[]>;
-    };
-    metadata: unknown;
-  }>;
-  normalized: {
-    care_labels: Array<Record<string, unknown>>;
-    hang_tags: Array<Record<string, unknown>>;
-  };
+  care_labels: Array<Record<string, unknown>>;
+  hang_tags: Array<Record<string, unknown>>;
 };
 
 export type ValidationResponse = {

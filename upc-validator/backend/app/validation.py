@@ -15,6 +15,8 @@ def _normalize_upc(value: Any) -> str:
     if value is None:
         return ""
     digits = re.sub(r"\D", "", str(value))
+    if len(digits) > 12:
+        digits = digits.lstrip("0")
     return digits
 
 

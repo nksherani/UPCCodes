@@ -1,4 +1,8 @@
+import logging
 import re
+import shutil
+import subprocess
+import tempfile
 from typing import Any
 
 import fitz  # PyMuPDF
@@ -17,11 +21,13 @@ from .common import (
     render_page_image,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _decode_barcodes(image: Image.Image) -> list[str]:
     if zbar_decode is None:
-        return []
-    decoded = zbar_decode(image)
+        logger.warning("pyzbar unavailable; will try zbarimg fallback.")
+    decoded = zbar_decode(image) if zbar_decode is not None else []
     values: list[str] = []
     for item in decoded:
         try:
@@ -30,6 +36,40 @@ def _decode_barcodes(image: Image.Image) -> list[str]:
             continue
         if value:
             values.append(value)
+    if values:
+        logger.info("Decoded %s barcode(s) via pyzbar.", len(values))
+        return values
+
+    zbarimg = shutil.which("zbarimg")
+    if not zbarimg:
+        logger.warning("zbarimg binary not found; barcode decode skipped.")
+        return values
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        image_path = f"{tmpdir}/barcode.png"
+        image.save(image_path, "PNG")
+        try:
+            result = subprocess.run(
+                [zbarimg, "--raw", image_path],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError as exc:
+            logger.warning("zbarimg failed to run: %s", exc)
+            return values
+
+    output = (result.stdout or "").strip()
+    if not output:
+        logger.info("zbarimg returned no barcode output.")
+        return values
+
+    for line in output.splitlines():
+        cleaned = line.strip()
+        if cleaned:
+            values.append(cleaned)
+    if values:
+        logger.info("Decoded %s barcode(s) via zbarimg.", len(values))
     return values
 
 

@@ -27,6 +27,20 @@ export default function App() {
     data: null,
   });
 
+  const mergedItems =
+    extractState.data
+      ? [
+          ...extractState.data.care_labels.map((item) => ({
+            type: "Care Label",
+            ...item,
+          })),
+          ...extractState.data.hang_tags.map((item) => ({
+            type: "Hang Tag",
+            ...item,
+          })),
+        ]
+      : [];
+
   const handleExtract = async () => {
     if (!pdfFiles || pdfFiles.length === 0) {
       setExtractState({ loading: false, error: "Select PDF files first.", data: null });
@@ -92,15 +106,42 @@ export default function App() {
         {extractState.data && (
           <div className="summary">
             <p>
-              Files processed: {extractState.data.files.length}
-            </p>
-            <p>
-              Care labels: {extractState.data.normalized.care_labels.length} | Hang tags:{" "}
-              {extractState.data.normalized.hang_tags.length}
+              Care labels: {extractState.data.care_labels.length} | Hang tags:{" "}
+              {extractState.data.hang_tags.length}
             </p>
           </div>
         )}
       </section>
+
+      {extractState.data && (
+        <section className="card">
+          <h2>Extracted Items</h2>
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Style</th>
+                  <th>Size</th>
+                  <th>Color</th>
+                  <th>UPC</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mergedItems.map((item, index) => (
+                  <tr key={`${item.type}-${index}`}>
+                    <td>{item.type}</td>
+                    <td>{item.style_number as string}</td>
+                    <td>{item.size as string}</td>
+                    <td>{item.color as string}</td>
+                    <td>{item.upc as string}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <section className="card">
         <h2>2. Upload Spreadsheet</h2>
