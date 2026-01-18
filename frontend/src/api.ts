@@ -5,7 +5,7 @@ export type ExtractResponse = {
 
 const API_BASE = "http://localhost:8000";
 
-export async function extractFiles(files: FileList): Promise<ExtractResponse> {
+export async function extractFiles(files: FileList | File[]): Promise<ExtractResponse> {
   const formData = new FormData();
   Array.from(files).forEach((file) => formData.append("files", file));
   const response = await fetch(`${API_BASE}/extract`, {

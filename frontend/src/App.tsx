@@ -19,7 +19,6 @@ type ItemRow = {
 };
 
 export default function App() {
-  const [pdfFiles, setPdfFiles] = useState<FileList | null>(null);
   const [sheetPreview, setSheetPreview] = useState<{
     headers: string[];
     rows: string[][];
@@ -45,31 +44,7 @@ export default function App() {
         ].map((item) => item as ItemRow)
       : [];
 
-  const handleExtract = async () => {
-    if (!pdfFiles || pdfFiles.length === 0) {
-      setExtractState({ loading: false, error: "Select PDF files first.", data: null });
-      return;
-    }
-    setExtractState({ loading: true, error: "", data: null });
-    try {
-      const data = await extractFiles(pdfFiles);
-      setExtractState({ loading: false, error: "", data });
-    } catch (error) {
-      setExtractState({
-        loading: false,
-        error: error instanceof Error ? error.message : "Failed to extract.",
-        data: null,
-      });
-    }
-  };
-
-  const handleSheetChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] ?? null;
-    setSheetPreview(null);
-    setSheetError("");
-    if (!file) {
-      return;
-    }
+  const readSpreadsheetFile = async (file: File) => {
     try {
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data, { type: "array" });
@@ -115,6 +90,64 @@ export default function App() {
     }
   };
 
+  const handleCombinedUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    setSheetPreview(null);
+    setSheetError("");
+    setExtractState({ loading: false, error: "", data: null });
+    if (files.length === 0) {
+      return;
+    }
+
+    const isPdf = (file: File) =>
+      file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    const isSpreadsheet = (file: File) => {
+      const name = file.name.toLowerCase();
+      return (
+        name.endsWith(".xlsx") ||
+        name.endsWith(".xls") ||
+        file.type ===
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+        file.type === "application/vnd.ms-excel"
+      );
+    };
+
+    const pdfs = files.filter(isPdf);
+    const sheetFile = files.find(isSpreadsheet) ?? null;
+
+    if (files.filter(isSpreadsheet).length > 1) {
+      setSheetError("Please upload only one spreadsheet.");
+    }
+
+    if (sheetFile) {
+      await readSpreadsheetFile(sheetFile);
+    } else {
+      setSheetError("Include a spreadsheet (.xlsx or .xls).");
+    }
+
+    if (pdfs.length === 0) {
+      setExtractState({
+        loading: false,
+        error: "Add at least one PDF file to extract metadata.",
+        data: null,
+      });
+      return;
+    }
+
+    setExtractState({ loading: true, error: "", data: null });
+    try {
+      const data = await extractFiles(pdfs);
+      setExtractState({ loading: false, error: "", data });
+    } catch (error) {
+      setExtractState({
+        loading: false,
+        error: error instanceof Error ? error.message : "Failed to extract.",
+        data: null,
+      });
+    }
+  };
+
   const sheetIndices = useMemo(() => {
     if (!sheetPreview) {
       return { upc: -1, size: -1, color: -1 };
@@ -155,6 +188,26 @@ export default function App() {
     [mergedItems]
   );
 
+  const careLabelsNormalized = useMemo(
+    () =>
+      extractState.data?.care_labels.map((item) => ({
+        upc: String(item.upc ?? ""),
+        size: String(item.size ?? "").toUpperCase(),
+        color: String(item.color ?? "").toUpperCase(),
+      })) ?? [],
+    [extractState.data]
+  );
+
+  const hangTagsNormalized = useMemo(
+    () =>
+      extractState.data?.hang_tags.map((item) => ({
+        upc: String(item.upc ?? ""),
+        size: String(item.size ?? "").toUpperCase(),
+        color: String(item.color ?? "").toUpperCase(),
+      })) ?? [],
+    [extractState.data]
+  );
+
   const upcToSheetRows = useMemo(() => {
     const map = new Map<string, typeof sheetRowsNormalized>();
     sheetRowsNormalized.forEach((row) => {
@@ -180,6 +233,32 @@ export default function App() {
     });
     return map;
   }, [extractedNormalized]);
+
+  const upcToCareLabels = useMemo(() => {
+    const map = new Map<string, typeof careLabelsNormalized>();
+    careLabelsNormalized.forEach((row) => {
+      if (!row.upc) {
+        return;
+      }
+      const list = map.get(row.upc) ?? [];
+      list.push(row);
+      map.set(row.upc, list);
+    });
+    return map;
+  }, [careLabelsNormalized]);
+
+  const upcToHangTags = useMemo(() => {
+    const map = new Map<string, typeof hangTagsNormalized>();
+    hangTagsNormalized.forEach((row) => {
+      if (!row.upc) {
+        return;
+      }
+      const list = map.get(row.upc) ?? [];
+      list.push(row);
+      map.set(row.upc, list);
+    });
+    return map;
+  }, [hangTagsNormalized]);
 
   const matchStatus = (
     upc: string,
@@ -315,16 +394,18 @@ export default function App() {
       </header>
 
       <section className="card">
-        <h2>1. Upload PDF Files</h2>
+        <h2>1. Upload PDF + Spreadsheet</h2>
+        <p>
+          Select your PDF files and the XLSX in one upload. Extraction and preview start
+          automatically.
+        </p>
         <input
           type="file"
-          accept="application/pdf"
+          accept=".pdf,.xlsx,.xls,application/pdf"
           multiple
-          onChange={(event) => setPdfFiles(event.target.files)}
+          onChange={handleCombinedUpload}
         />
-        <button onClick={handleExtract} disabled={extractState.loading}>
-          {extractState.loading ? "Extracting..." : "Extract Metadata"}
-        </button>
+        {extractState.loading && <p>Extracting metadata...</p>}
         {extractState.error && <p className="error">{extractState.error}</p>}
         {extractState.data && (
           <div className="summary">
@@ -395,17 +476,12 @@ export default function App() {
       )}
 
       <section className="card">
-        <h2>2. Upload Spreadsheet</h2>
+        <h2>2. Spreadsheet Preview</h2>
         <div className="legend">
           <span className="legend-item row-match">Match (UPC + size + color)</span>
           <span className="legend-item row-mismatch">Mismatch (UPC found, size/color differ)</span>
           <span className="legend-item row-missing">Missing (UPC only in one table)</span>
         </div>
-        <input
-          type="file"
-          accept=".xlsx,.xls"
-          onChange={handleSheetChange}
-        />
         {sheetPreview && (
           <button type="button" onClick={exportSpreadsheetPreview} className="secondary-button">
             Export Spreadsheet
@@ -420,33 +496,43 @@ export default function App() {
                   {sheetPreview.headers.map((header, index) => (
                     <th key={`${header}-${index}`}>{header}</th>
                   ))}
+                  <th>Care Label</th>
+                  <th>Hang Tag</th>
                 </tr>
               </thead>
               <tbody>
                 {sheetRowsNormalized.map((row, rowIndex) => {
-                  const status = matchStatus(
+                  const careStatus = matchStatus(
                     row.upc,
                     row.size,
                     row.color,
-                    upcToExtracted.get(row.upc) ?? []
+                    upcToCareLabels.get(row.upc) ?? []
+                  );
+                  const hangStatus = matchStatus(
+                    row.upc,
+                    row.size,
+                    row.color,
+                    upcToHangTags.get(row.upc) ?? []
                   );
                   return (
-                    <tr key={`row-${rowIndex}`} className={`row-${status.status}`}>
-                      {row.row.map((cell, cellIndex) => {
-                        const isSize = cellIndex === sheetIndices.size;
-                        const isColor = cellIndex === sheetIndices.color;
-                        const mismatch =
-                          status.status === "mismatch" &&
-                          ((isSize && !status.sizeMatch) || (isColor && !status.colorMatch));
-                        return (
-                          <td
-                            key={`cell-${rowIndex}-${cellIndex}`}
-                            className={mismatch ? "cell-mismatch" : ""}
-                          >
-                            {cell}
-                          </td>
-                        );
-                      })}
+                    <tr key={`row-${rowIndex}`}>
+                      {row.row.map((cell, cellIndex) => (
+                        <td key={`cell-${rowIndex}-${cellIndex}`}>{cell}</td>
+                      ))}
+                      <td className={`row-${careStatus.status}`}>
+                        {careStatus.status === "match"
+                          ? "Match"
+                          : careStatus.status === "mismatch"
+                          ? "Mismatch"
+                          : "Not found"}
+                      </td>
+                      <td className={`row-${hangStatus.status}`}>
+                        {hangStatus.status === "match"
+                          ? "Match"
+                          : hangStatus.status === "mismatch"
+                          ? "Mismatch"
+                          : "Not found"}
+                      </td>
                     </tr>
                   );
                 })}
