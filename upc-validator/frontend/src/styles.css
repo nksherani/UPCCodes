@@ -50,6 +50,11 @@ button:disabled {
   cursor: not-allowed;
 }
 
+.secondary-button {
+  background: #e1e7ff;
+  color: #1b1d29;
+}
+
 .error {
   color: #b42318;
   margin: 0;
@@ -96,4 +101,18 @@ th {
 
 .cell-mismatch {
   background: #f9caca;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.legend-item {
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid rgba(0, 0, 0, 0.08);
 }

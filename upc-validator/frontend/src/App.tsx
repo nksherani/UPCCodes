@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import * as XLSX from "xlsx";
+import * as XLSXStyle from "xlsx-js-style";
 import { extractFiles } from "./api";
 
 type ExtractState = {
@@ -201,6 +202,108 @@ export default function App() {
     return { status: "mismatch", sizeMatch, colorMatch };
   };
 
+  const rowFill = (status: "missing" | "mismatch" | "match") => {
+    if (status === "match") {
+      return "E7F6EC";
+    }
+    if (status === "mismatch") {
+      return "FDE8E8";
+    }
+    return "FFF4E5";
+  };
+
+  const mismatchFill = "F9CACA";
+
+  const applyCellStyle = (worksheet: any, cellAddress: string, fillColor: string) => {
+    const cell = worksheet[cellAddress];
+    if (!cell) {
+      return;
+    }
+    cell.s = {
+      fill: {
+        fgColor: { rgb: fillColor },
+      },
+    };
+  };
+
+  const exportExtracted = () => {
+    const headers = ["Type", "Style", "Size", "Color", "UPC"];
+    const rows = mergedItems.map((item) => [
+      item.type ?? "",
+      item.style_number ?? "",
+      item.size ?? "",
+      item.color ?? "",
+      item.upc ?? "",
+    ]);
+    const sheet = XLSXStyle.utils.aoa_to_sheet([headers, ...rows]);
+    rows.forEach((row, index) => {
+      const status = matchStatus(
+        String(row[4] ?? ""),
+        String(row[2] ?? "").toUpperCase(),
+        String(row[3] ?? "").toUpperCase(),
+        upcToSheetRows.get(String(row[4] ?? "")) ?? []
+      );
+      const fill = rowFill(status.status as "missing" | "mismatch" | "match");
+      for (let c = 0; c < headers.length; c += 1) {
+        const addr = XLSXStyle.utils.encode_cell({ r: index + 1, c });
+        applyCellStyle(sheet, addr, fill);
+      }
+      if (status.status === "mismatch") {
+        if (!status.sizeMatch) {
+          applyCellStyle(sheet, XLSXStyle.utils.encode_cell({ r: index + 1, c: 2 }), mismatchFill);
+        }
+        if (!status.colorMatch) {
+          applyCellStyle(sheet, XLSXStyle.utils.encode_cell({ r: index + 1, c: 3 }), mismatchFill);
+        }
+      }
+    });
+    const workbook = XLSXStyle.utils.book_new();
+    XLSXStyle.utils.book_append_sheet(workbook, sheet, "Extracted");
+    XLSXStyle.writeFile(workbook, "extracted_items.xlsx");
+  };
+
+  const exportSpreadsheetPreview = () => {
+    if (!sheetPreview) {
+      return;
+    }
+    const headers = sheetPreview.headers;
+    const rows = sheetRowsNormalized.map((row) => row.row);
+    const sheet = XLSXStyle.utils.aoa_to_sheet([headers, ...rows]);
+    rows.forEach((row, index) => {
+      const normalized = sheetRowsNormalized[index];
+      const status = matchStatus(
+        normalized.upc,
+        normalized.size,
+        normalized.color,
+        upcToExtracted.get(normalized.upc) ?? []
+      );
+      const fill = rowFill(status.status as "missing" | "mismatch" | "match");
+      for (let c = 0; c < headers.length; c += 1) {
+        const addr = XLSXStyle.utils.encode_cell({ r: index + 1, c });
+        applyCellStyle(sheet, addr, fill);
+      }
+      if (status.status === "mismatch") {
+        if (!status.sizeMatch && sheetIndices.size >= 0) {
+          applyCellStyle(
+            sheet,
+            XLSXStyle.utils.encode_cell({ r: index + 1, c: sheetIndices.size }),
+            mismatchFill
+          );
+        }
+        if (!status.colorMatch && sheetIndices.color >= 0) {
+          applyCellStyle(
+            sheet,
+            XLSXStyle.utils.encode_cell({ r: index + 1, c: sheetIndices.color }),
+            mismatchFill
+          );
+        }
+      }
+    });
+    const workbook = XLSXStyle.utils.book_new();
+    XLSXStyle.utils.book_append_sheet(workbook, sheet, "Spreadsheet");
+    XLSXStyle.writeFile(workbook, "spreadsheet_preview.xlsx");
+  };
+
   return (
     <div className="container">
       <header>
@@ -236,6 +339,14 @@ export default function App() {
       {extractState.data && (
         <section className="card">
           <h2>Extracted Items</h2>
+          <div className="legend">
+            <span className="legend-item row-match">Match (UPC + size + color)</span>
+            <span className="legend-item row-mismatch">Mismatch (UPC found, size/color differ)</span>
+            <span className="legend-item row-missing">Missing (UPC only in one table)</span>
+          </div>
+          <button type="button" onClick={exportExtracted} className="secondary-button">
+            Export Extracted Items
+          </button>
           <div className="table-wrapper">
             <table>
               <thead>
@@ -285,11 +396,21 @@ export default function App() {
 
       <section className="card">
         <h2>2. Upload Spreadsheet</h2>
+        <div className="legend">
+          <span className="legend-item row-match">Match (UPC + size + color)</span>
+          <span className="legend-item row-mismatch">Mismatch (UPC found, size/color differ)</span>
+          <span className="legend-item row-missing">Missing (UPC only in one table)</span>
+        </div>
         <input
           type="file"
           accept=".xlsx,.xls"
           onChange={handleSheetChange}
         />
+        {sheetPreview && (
+          <button type="button" onClick={exportSpreadsheetPreview} className="secondary-button">
+            Export Spreadsheet
+          </button>
+        )}
         {sheetError && <p className="error">{sheetError}</p>}
         {sheetPreview && (
           <div className="table-wrapper">
