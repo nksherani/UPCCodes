@@ -81,3 +81,19 @@ th {
   background: #f6f7fb;
   font-weight: 600;
 }
+
+.row-missing {
+  background: #fff4e5;
+}
+
+.row-mismatch {
+  background: #fde8e8;
+}
+
+.row-match {
+  background: #e7f6ec;
+}
+
+.cell-mismatch {
+  background: #f9caca;
+}

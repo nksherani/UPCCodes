@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import * as XLSX from "xlsx";
-import { extractFiles, validateSpreadsheet } from "./api";
+import { extractFiles } from "./api";
 
 type ExtractState = {
   loading: boolean;
@@ -8,15 +8,17 @@ type ExtractState = {
   data: null | Awaited<ReturnType<typeof extractFiles>>;
 };
 
-type ValidationState = {
-  loading: boolean;
-  error: string;
-  data: null | Awaited<ReturnType<typeof validateSpreadsheet>>;
+type ItemRow = {
+  type: string;
+  style_number?: string;
+  size?: string;
+  color?: string;
+  upc?: string;
+  [key: string]: unknown;
 };
 
 export default function App() {
   const [pdfFiles, setPdfFiles] = useState<FileList | null>(null);
-  const [sheetFile, setSheetFile] = useState<File | null>(null);
   const [sheetPreview, setSheetPreview] = useState<{
     headers: string[];
     rows: string[][];
@@ -27,13 +29,8 @@ export default function App() {
     error: "",
     data: null,
   });
-  const [validationState, setValidationState] = useState<ValidationState>({
-    loading: false,
-    error: "",
-    data: null,
-  });
 
-  const mergedItems =
+  const mergedItems: ItemRow[] =
     extractState.data
       ? [
           ...extractState.data.care_labels.map((item) => ({
@@ -44,7 +41,7 @@ export default function App() {
             type: "Hang Tag",
             ...item,
           })),
-        ]
+        ].map((item) => item as ItemRow)
       : [];
 
   const handleExtract = async () => {
@@ -65,31 +62,8 @@ export default function App() {
     }
   };
 
-  const handleValidate = async () => {
-    if (!sheetFile) {
-      setValidationState({ loading: false, error: "Select an Excel file.", data: null });
-      return;
-    }
-    if (!extractState.data) {
-      setValidationState({ loading: false, error: "Run extraction first.", data: null });
-      return;
-    }
-    setValidationState({ loading: true, error: "", data: null });
-    try {
-      const data = await validateSpreadsheet(sheetFile, extractState.data);
-      setValidationState({ loading: false, error: "", data });
-    } catch (error) {
-      setValidationState({
-        loading: false,
-        error: error instanceof Error ? error.message : "Validation failed.",
-        data: null,
-      });
-    }
-  };
-
   const handleSheetChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0] ?? null;
-    setSheetFile(file);
     setSheetPreview(null);
     setSheetError("");
     if (!file) {
@@ -140,6 +114,93 @@ export default function App() {
     }
   };
 
+  const sheetIndices = useMemo(() => {
+    if (!sheetPreview) {
+      return { upc: -1, size: -1, color: -1 };
+    }
+    const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const headers = sheetPreview.headers.map(normalize);
+    const findIndex = (candidates: string[]) =>
+      headers.findIndex((header) => candidates.some((candidate) => header.includes(candidate)));
+    return {
+      upc: findIndex(["carelabelupc", "careupc", "hangtagupc", "rfidupc", "upc"]),
+      size: findIndex(["size"]),
+      color: findIndex(["color"]),
+    };
+  }, [sheetPreview]);
+
+  const sheetRowsNormalized = useMemo(() => {
+    if (!sheetPreview) {
+      return [];
+    }
+    const getCell = (row: string[], index: number) =>
+      index >= 0 ? (row[index] ?? "").trim() : "";
+    return sheetPreview.rows.map((row) => ({
+      upc: getCell(row, sheetIndices.upc),
+      size: getCell(row, sheetIndices.size).toUpperCase(),
+      color: getCell(row, sheetIndices.color).toUpperCase(),
+      row,
+    }));
+  }, [sheetPreview, sheetIndices]);
+
+  const extractedNormalized = useMemo(
+    () =>
+      mergedItems.map((item) => ({
+        upc: String(item.upc ?? ""),
+        size: String(item.size ?? "").toUpperCase(),
+        color: String(item.color ?? "").toUpperCase(),
+        item,
+      })),
+    [mergedItems]
+  );
+
+  const upcToSheetRows = useMemo(() => {
+    const map = new Map<string, typeof sheetRowsNormalized>();
+    sheetRowsNormalized.forEach((row) => {
+      if (!row.upc) {
+        return;
+      }
+      const list = map.get(row.upc) ?? [];
+      list.push(row);
+      map.set(row.upc, list);
+    });
+    return map;
+  }, [sheetRowsNormalized]);
+
+  const upcToExtracted = useMemo(() => {
+    const map = new Map<string, typeof extractedNormalized>();
+    extractedNormalized.forEach((row) => {
+      if (!row.upc) {
+        return;
+      }
+      const list = map.get(row.upc) ?? [];
+      list.push(row);
+      map.set(row.upc, list);
+    });
+    return map;
+  }, [extractedNormalized]);
+
+  const matchStatus = (
+    upc: string,
+    size: string,
+    color: string,
+    otherRows: Array<{ size: string; color: string }>
+  ) => {
+    if (!upc) {
+      return { status: "missing", sizeMatch: false, colorMatch: false };
+    }
+    if (otherRows.length === 0) {
+      return { status: "missing", sizeMatch: false, colorMatch: false };
+    }
+    const exact = otherRows.find((row) => row.size === size && row.color === color);
+    if (exact) {
+      return { status: "match", sizeMatch: true, colorMatch: true };
+    }
+    const sizeMatch = otherRows.some((row) => row.size === size);
+    const colorMatch = otherRows.some((row) => row.color === color);
+    return { status: "mismatch", sizeMatch, colorMatch };
+  };
+
   return (
     <div className="container">
       <header>
@@ -187,15 +248,35 @@ export default function App() {
                 </tr>
               </thead>
               <tbody>
-                {mergedItems.map((item, index) => (
-                  <tr key={`${item.type}-${index}`}>
+                {mergedItems.map((item, index) => {
+                  const status = matchStatus(
+                    String(item.upc ?? ""),
+                    String(item.size ?? "").toUpperCase(),
+                    String(item.color ?? "").toUpperCase(),
+                    upcToSheetRows.get(String(item.upc ?? "")) ?? []
+                  );
+                  return (
+                    <tr key={`${item.type}-${index}`} className={`row-${status.status}`}>
                     <td>{item.type}</td>
                     <td>{item.style_number as string}</td>
-                    <td>{item.size as string}</td>
-                    <td>{item.color as string}</td>
+                    <td
+                      className={
+                        status.status === "mismatch" && !status.sizeMatch ? "cell-mismatch" : ""
+                      }
+                    >
+                      {item.size as string}
+                    </td>
+                    <td
+                      className={
+                        status.status === "mismatch" && !status.colorMatch ? "cell-mismatch" : ""
+                      }
+                    >
+                      {item.color as string}
+                    </td>
                     <td>{item.upc as string}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -221,28 +302,35 @@ export default function App() {
                 </tr>
               </thead>
               <tbody>
-                {sheetPreview.rows.map((row, rowIndex) => (
-                  <tr key={`row-${rowIndex}`}>
-                    {row.map((cell, cellIndex) => (
-                      <td key={`cell-${rowIndex}-${cellIndex}`}>{cell}</td>
-                    ))}
-                  </tr>
-                ))}
+                {sheetRowsNormalized.map((row, rowIndex) => {
+                  const status = matchStatus(
+                    row.upc,
+                    row.size,
+                    row.color,
+                    upcToExtracted.get(row.upc) ?? []
+                  );
+                  return (
+                    <tr key={`row-${rowIndex}`} className={`row-${status.status}`}>
+                      {row.row.map((cell, cellIndex) => {
+                        const isSize = cellIndex === sheetIndices.size;
+                        const isColor = cellIndex === sheetIndices.color;
+                        const mismatch =
+                          status.status === "mismatch" &&
+                          ((isSize && !status.sizeMatch) || (isColor && !status.colorMatch));
+                        return (
+                          <td
+                            key={`cell-${rowIndex}-${cellIndex}`}
+                            className={mismatch ? "cell-mismatch" : ""}
+                          >
+                            {cell}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
-          </div>
-        )}
-        <button onClick={handleValidate} disabled={validationState.loading}>
-          {validationState.loading ? "Validating..." : "Validate UPCs"}
-        </button>
-        {validationState.error && <p className="error">{validationState.error}</p>}
-        {validationState.data && (
-          <div className="summary">
-            <p>Rows validated: {validationState.data.summary.rows}</p>
-            <p>
-              Care label matches: {validationState.data.summary.care_label_matches} | Hang
-              tag matches: {validationState.data.summary.hang_tag_matches}
-            </p>
           </div>
         )}
       </section>

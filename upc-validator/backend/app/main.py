@@ -1,15 +1,13 @@
-import json
 import os
 import tempfile
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.extractors.carelabel import extract_care_labels
 from app.extractors.classifier import classify_pdf
 from app.extractors.rfid import extract_hang_tags
-from app.validation import read_spreadsheet, validate_rows
 
 app = FastAPI(title="UPC Validator API", version="0.1.0")
 
@@ -90,36 +88,3 @@ def extract(files: list[UploadFile] = File(...)) -> dict[str, Any]:
     }
 
 
-@app.post("/validate")
-def validate(
-    spreadsheet: UploadFile = File(...),
-    metadata_json: str = Form(...),
-) -> dict[str, Any]:
-    if spreadsheet.content_type not in {
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.ms-excel",
-        "application/octet-stream",
-    }:
-        raise HTTPException(status_code=400, detail="Spreadsheet must be an Excel file.")
-
-    try:
-        metadata = json.loads(metadata_json)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {exc}") from exc
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-        tmp.write(spreadsheet.file.read())
-        spreadsheet_path = tmp.name
-
-    try:
-        rows = read_spreadsheet(spreadsheet_path)
-    finally:
-        try:
-            os.remove(spreadsheet_path)
-        except OSError:
-            pass
-
-    care_labels = metadata.get("care_labels", [])
-    hang_tags = metadata.get("hang_tags", [])
-
-    return validate_rows(rows, care_labels, hang_tags)
