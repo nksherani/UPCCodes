@@ -141,11 +141,7 @@ def extract_care_labels(
     left_offset: float = 45.0,
     top_ratio: float = 0.22,
     bottom_ratio: float = 0.61,
-    output_dir: str | None = None,
 ) -> dict[str, Any]:
-    if output_dir is None:
-        output_dir = os.path.join(os.getcwd(), "output", "care_labels")
-    os.makedirs(output_dir, exist_ok=True)
     doc = fitz.open(pdf_path)
     mat = fitz.Matrix(zoom, zoom)
     labels: list[dict[str, Any]] = []
@@ -172,9 +168,6 @@ def extract_care_labels(
             pix = page.get_pixmap(matrix=mat, clip=clip_rect)
             mode = "RGBA" if pix.alpha else "RGB"
             img = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
-            filename = f"page{page_num + 1}_label{i}.png"
-            image_path = os.path.join(output_dir, filename)
-            img.save(image_path, "PNG")
 
             label_text = page.get_text("text", clip=clip_rect) or ""
             ocr_text = ocr_image(img) if len(label_text.strip()) < 20 else ""
@@ -183,7 +176,6 @@ def extract_care_labels(
             label_info = extract_care_label_info(combined_text)
             label_info["page"] = page_num + 1
             label_info["position"] = i
-            label_info["image_path"] = image_path
             labels.append(label_info)
 
     doc.close()
