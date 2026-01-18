@@ -1,6 +1,9 @@
 import json
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -62,10 +65,33 @@ def _extract_upc_candidate(text: str) -> str:
 
 
 def _ocr_image(image: Image.Image) -> str:
-    if pytesseract is None:
-        return ""
     gray = ImageOps.autocontrast(image.convert("L"))
-    return pytesseract.image_to_string(gray, config="--psm 6")
+    if pytesseract is not None:
+        return pytesseract.image_to_string(gray, config="--psm 6")
+    tesseract_bin = shutil.which("tesseract")
+    if not tesseract_bin:
+        print("tesseract not available; OCR skipped")
+        return ""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_path = os.path.join(tmpdir, "ocr_input.png")
+        output_base = os.path.join(tmpdir, "ocr_output")
+        gray.save(input_path, "PNG")
+        try:
+            subprocess.run(
+                [tesseract_bin, input_path, output_base, "--psm", "6"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            print(f"tesseract failed: {exc.stderr.strip()}")
+            return ""
+        output_path = f"{output_base}.txt"
+        try:
+            with open(output_path, "r", encoding="utf-8") as handle:
+                return handle.read()
+        except FileNotFoundError:
+            return ""
 
 
 def extract_parent_info(pdf_path: str) -> dict:
@@ -73,12 +99,13 @@ def extract_parent_info(pdf_path: str) -> dict:
     doc = fitz.open(pdf_path)
     page = doc[0]
     text = page.get_text() or ""
-    if not text.strip() and pytesseract is not None:
+    if not text.strip():
         pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
         mode = "RGBA" if pix.alpha else "RGB"
         page_img = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
         text = _ocr_image(page_img)
     parent_info: dict = {}
+    normalized = _normalize_text(text)
 
     ref_match = re.search(r"Reference #:\s*([^\n]+)", text)
     if ref_match:
@@ -99,6 +126,10 @@ def extract_parent_info(pdf_path: str) -> dict:
     date_match = re.search(r"Date:\s*([^\n]+)", text)
     if date_match:
         parent_info["date"] = date_match.group(1).strip()
+
+    color_match = re.search(r"\b(BLACK\s+SOOT|BLAC\s+SOOT)\b", normalized, re.IGNORECASE)
+    if color_match:
+        parent_info["color"] = "BLACK SOOT"
 
     doc.close()
     return parent_info
