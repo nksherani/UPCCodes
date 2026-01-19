@@ -177,6 +177,38 @@ export default function App() {
     }));
   }, [sheetPreview, sheetIndices]);
 
+  const displaySheet = useMemo(() => {
+    if (!sheetPreview) {
+      return null;
+    }
+    const totalCols = sheetPreview.headers.length;
+    if (totalCols === 0) {
+      return { headers: [], rows: [], upcIndex: -1 };
+    }
+    if (sheetIndices.upc < 0) {
+      return {
+        headers: sheetPreview.headers,
+        rows: sheetPreview.rows,
+        upcIndex: sheetIndices.upc,
+      };
+    }
+    const hasValue = (colIndex: number) =>
+      sheetPreview.rows.some((row) => (row[colIndex] ?? "").trim());
+    const keepIndices = Array.from({ length: totalCols }, (_, index) => index).filter(
+      (index) =>
+        index <= sheetIndices.upc ||
+        (sheetPreview.headers[index] ?? "").trim() ||
+        hasValue(index)
+    );
+    const headers = keepIndices.map((index) => sheetPreview.headers[index] ?? "");
+    const rows = sheetPreview.rows.map((row) => keepIndices.map((index) => row[index] ?? ""));
+    return {
+      headers,
+      rows,
+      upcIndex: keepIndices.indexOf(sheetIndices.upc),
+    };
+  }, [sheetPreview, sheetIndices]);
+
   const extractedNormalized = useMemo(
     () =>
       mergedItems.map((item) => ({
@@ -345,38 +377,56 @@ export default function App() {
     if (!sheetPreview) {
       return;
     }
-    const headers = sheetPreview.headers;
-    const rows = sheetRowsNormalized.map((row) => row.row);
+    const baseHeaders = displaySheet?.headers ?? sheetPreview.headers;
+    const baseRows = displaySheet?.rows ?? sheetPreview.rows;
+    const headers = [...baseHeaders, "Care Label", "Hang Tag"];
+    const rows = sheetRowsNormalized.map((row, index) => {
+      const careStatus = matchStatus(
+        row.upc,
+        row.size,
+        row.color,
+        upcToCareLabels.get(row.upc) ?? []
+      );
+      const hangStatus = matchStatus(
+        row.upc,
+        row.size,
+        row.color,
+        upcToHangTags.get(row.upc) ?? []
+      );
+      const careLabel =
+        careStatus.status === "match"
+          ? "Match"
+          : careStatus.status === "mismatch"
+          ? "Mismatch"
+          : "Not found";
+      const hangTag =
+        hangStatus.status === "match"
+          ? "Match"
+          : hangStatus.status === "mismatch"
+          ? "Mismatch"
+          : "Not found";
+      return [...(baseRows[index] ?? []), careLabel, hangTag];
+    });
     const sheet = XLSXStyle.utils.aoa_to_sheet([headers, ...rows]);
     rows.forEach((row, index) => {
-      const normalized = sheetRowsNormalized[index];
-      const status = matchStatus(
-        normalized.upc,
-        normalized.size,
-        normalized.color,
-        upcToExtracted.get(normalized.upc) ?? []
+      const careStatus = matchStatus(
+        sheetRowsNormalized[index].upc,
+        sheetRowsNormalized[index].size,
+        sheetRowsNormalized[index].color,
+        upcToCareLabels.get(sheetRowsNormalized[index].upc) ?? []
       );
-      const fill = rowFill(status.status as "missing" | "mismatch" | "match");
-      for (let c = 0; c < headers.length; c += 1) {
-        const addr = XLSXStyle.utils.encode_cell({ r: index + 1, c });
-        applyCellStyle(sheet, addr, fill);
-      }
-      if (status.status === "mismatch") {
-        if (!status.sizeMatch && sheetIndices.size >= 0) {
-          applyCellStyle(
-            sheet,
-            XLSXStyle.utils.encode_cell({ r: index + 1, c: sheetIndices.size }),
-            mismatchFill
-          );
-        }
-        if (!status.colorMatch && sheetIndices.color >= 0) {
-          applyCellStyle(
-            sheet,
-            XLSXStyle.utils.encode_cell({ r: index + 1, c: sheetIndices.color }),
-            mismatchFill
-          );
-        }
-      }
+      const hangStatus = matchStatus(
+        sheetRowsNormalized[index].upc,
+        sheetRowsNormalized[index].size,
+        sheetRowsNormalized[index].color,
+        upcToHangTags.get(sheetRowsNormalized[index].upc) ?? []
+      );
+      const careFill = rowFill(careStatus.status as "missing" | "mismatch" | "match");
+      const hangFill = rowFill(hangStatus.status as "missing" | "mismatch" | "match");
+      const careAddr = XLSXStyle.utils.encode_cell({ r: index + 1, c: headers.length - 2 });
+      const hangAddr = XLSXStyle.utils.encode_cell({ r: index + 1, c: headers.length - 1 });
+      applyCellStyle(sheet, careAddr, careFill);
+      applyCellStyle(sheet, hangAddr, hangFill);
     });
     const workbook = XLSXStyle.utils.book_new();
     XLSXStyle.utils.book_append_sheet(workbook, sheet, "Spreadsheet");
@@ -385,162 +435,90 @@ export default function App() {
 
   return (
     <div className="container">
-      <header>
-        <h1>UPC Validator POC</h1>
-        <p>
-          Upload care label and RFID PDFs, extract metadata, then validate against a
-          spreadsheet.
-        </p>
-      </header>
-
-      <section className="card">
-        <h2>1. Upload PDF + Spreadsheet</h2>
-        <p>
-          Select your PDF files and the XLSX in one upload. Extraction and preview start
-          automatically.
-        </p>
-        <input
-          type="file"
-          accept=".pdf,.xlsx,.xls,application/pdf"
-          multiple
-          onChange={handleCombinedUpload}
-        />
-        {extractState.loading && <p>Extracting metadata...</p>}
-        {extractState.error && <p className="error">{extractState.error}</p>}
-        {extractState.data && (
-          <div className="summary">
-            <p>
-              Care labels: {extractState.data.care_labels.length} | Hang tags:{" "}
-              {extractState.data.hang_tags.length}
-            </p>
-          </div>
-        )}
-      </section>
-
-      {extractState.data && (
-        <section className="card">
-          <h2>Extracted Items</h2>
-          <div className="legend">
-            <span className="legend-item row-match">Match (UPC + size + color)</span>
-            <span className="legend-item row-mismatch">Mismatch (UPC found, size/color differ)</span>
-            <span className="legend-item row-missing">Missing (UPC only in one table)</span>
-          </div>
-          <button type="button" onClick={exportExtracted} className="secondary-button">
-            Export Extracted Items
-          </button>
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Type</th>
-                  <th>Style</th>
-                  <th>Size</th>
-                  <th>Color</th>
-                  <th>UPC</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mergedItems.map((item, index) => {
-                  const status = matchStatus(
-                    String(item.upc ?? ""),
-                    String(item.size ?? "").toUpperCase(),
-                    String(item.color ?? "").toUpperCase(),
-                    upcToSheetRows.get(String(item.upc ?? "")) ?? []
-                  );
-                  return (
-                    <tr key={`${item.type}-${index}`} className={`row-${status.status}`}>
-                    <td>{item.type}</td>
-                    <td>{item.style_number as string}</td>
-                    <td
-                      className={
-                        status.status === "mismatch" && !status.sizeMatch ? "cell-mismatch" : ""
-                      }
-                    >
-                      {item.size as string}
-                    </td>
-                    <td
-                      className={
-                        status.status === "mismatch" && !status.colorMatch ? "cell-mismatch" : ""
-                      }
-                    >
-                      {item.color as string}
-                    </td>
-                    <td>{item.upc as string}</td>
-                  </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-
-      <section className="card">
-        <h2>2. Spreadsheet Preview</h2>
-        <div className="legend">
-          <span className="legend-item row-match">Match (UPC + size + color)</span>
-          <span className="legend-item row-mismatch">Mismatch (UPC found, size/color differ)</span>
-          <span className="legend-item row-missing">Missing (UPC only in one table)</span>
+      <h1>UPC Validator POC</h1>
+      <p>
+        Upload care label and RFID PDFs with the spreadsheet. Extraction and validation
+        start automatically.
+      </p>
+      <input
+        type="file"
+        accept=".pdf,.xlsx,.xls,application/pdf"
+        multiple
+        onChange={handleCombinedUpload}
+      />
+      {extractState.loading && (
+        <div className="loader" role="status" aria-live="polite">
+          <div className="loader-bar" />
+          <span>Extracting and validating…</span>
         </div>
-        {sheetPreview && (
-          <button type="button" onClick={exportSpreadsheetPreview} className="secondary-button">
-            Export Spreadsheet
-          </button>
-        )}
-        {sheetError && <p className="error">{sheetError}</p>}
-        {sheetPreview && (
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  {sheetPreview.headers.map((header, index) => (
-                    <th key={`${header}-${index}`}>{header}</th>
-                  ))}
-                  <th>Care Label</th>
-                  <th>Hang Tag</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sheetRowsNormalized.map((row, rowIndex) => {
-                  const careStatus = matchStatus(
-                    row.upc,
-                    row.size,
-                    row.color,
-                    upcToCareLabels.get(row.upc) ?? []
-                  );
-                  const hangStatus = matchStatus(
-                    row.upc,
-                    row.size,
-                    row.color,
-                    upcToHangTags.get(row.upc) ?? []
-                  );
-                  return (
-                    <tr key={`row-${rowIndex}`}>
-                      {row.row.map((cell, cellIndex) => (
-                        <td key={`cell-${rowIndex}-${cellIndex}`}>{cell}</td>
-                      ))}
-                      <td className={`row-${careStatus.status}`}>
-                        {careStatus.status === "match"
-                          ? "Match"
-                          : careStatus.status === "mismatch"
-                          ? "Mismatch"
-                          : "Not found"}
+      )}
+      {extractState.data && sheetPreview && (
+        <button type="button" onClick={exportSpreadsheetPreview}>
+          Export to Excel
+        </button>
+      )}
+      {extractState.data && displaySheet && (
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                {displaySheet.headers.map((header, index) => (
+                  <th
+                    key={`${header}-${index}`}
+                    className={index === displaySheet.upcIndex ? "upc-column" : ""}
+                  >
+                    {header}
+                  </th>
+                ))}
+                <th>Care Label</th>
+                <th>Hang Tag</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sheetRowsNormalized.map((row, rowIndex) => {
+                const careStatus = matchStatus(
+                  row.upc,
+                  row.size,
+                  row.color,
+                  upcToCareLabels.get(row.upc) ?? []
+                );
+                const hangStatus = matchStatus(
+                  row.upc,
+                  row.size,
+                  row.color,
+                  upcToHangTags.get(row.upc) ?? []
+                );
+                return (
+                  <tr key={`row-${rowIndex}`}>
+                    {(displaySheet.rows[rowIndex] ?? []).map((cell, cellIndex) => (
+                      <td
+                        key={`cell-${rowIndex}-${cellIndex}`}
+                        className={cellIndex === displaySheet.upcIndex ? "upc-column" : ""}
+                      >
+                        {cell}
                       </td>
-                      <td className={`row-${hangStatus.status}`}>
-                        {hangStatus.status === "match"
-                          ? "Match"
-                          : hangStatus.status === "mismatch"
-                          ? "Mismatch"
-                          : "Not found"}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+                    ))}
+                    <td className={`row-${careStatus.status}`}>
+                      {careStatus.status === "match"
+                        ? "Match"
+                        : careStatus.status === "mismatch"
+                        ? "Mismatch"
+                        : "Not found"}
+                    </td>
+                    <td className={`row-${hangStatus.status}`}>
+                      {hangStatus.status === "match"
+                        ? "Match"
+                        : hangStatus.status === "mismatch"
+                        ? "Mismatch"
+                        : "Not found"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
