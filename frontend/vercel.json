@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "http://upc-api-nlb-a7e543136c7724d3.elb.us-east-1.amazonaws.com/:path*"
+      "destination": "http://34.193.182.209:8000/:path*"
     }
   ]
 }
