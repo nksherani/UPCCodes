@@ -17,3 +17,13 @@ output "log_group_name" {
   value       = aws_cloudwatch_log_group.backend.name
   description = "CloudWatch log group for container logs."
 }
+
+output "nlb_dns_name" {
+  value       = aws_lb.backend.dns_name
+  description = "DNS name for the public network load balancer."
+}
+
+output "nlb_eip_addresses" {
+  value       = sort([for eip in aws_eip.nlb : eip.public_ip])
+  description = "Static Elastic IP addresses assigned to the NLB."
+}

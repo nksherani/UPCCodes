@@ -62,3 +62,9 @@ variable "log_retention_days" {
   description = "CloudWatch log retention in days."
   default     = 7
 }
+
+variable "subnet_id" {
+  type        = string
+  description = "Optional subnet ID to pin the service/NLB to a single subnet."
+  default     = ""
+}

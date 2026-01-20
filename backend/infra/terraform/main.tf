@@ -23,6 +23,10 @@ data "aws_subnets" "default" {
   }
 }
 
+locals {
+  subnet_ids = var.subnet_id != "" ? [var.subnet_id] : data.aws_subnets.default.ids
+}
+
 data "aws_iam_policy_document" "ecs_task_assume" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -76,6 +80,49 @@ resource "aws_security_group" "backend" {
   }
 }
 
+resource "aws_eip" "nlb" {
+  for_each = toset(local.subnet_ids)
+  domain   = "vpc"
+}
+
+resource "aws_lb" "backend" {
+  name               = "${var.service_name}-nlb"
+  load_balancer_type = "network"
+  internal           = false
+
+  dynamic "subnet_mapping" {
+    for_each = local.subnet_ids
+    content {
+      subnet_id     = subnet_mapping.value
+      allocation_id = aws_eip.nlb[subnet_mapping.value].id
+    }
+  }
+}
+
+resource "aws_lb_target_group" "backend" {
+  name        = "${var.service_name}-tg"
+  port        = var.container_port
+  protocol    = "TCP"
+  vpc_id      = data.aws_vpc.default.id
+  target_type = "ip"
+
+  health_check {
+    protocol = "TCP"
+    port     = "traffic-port"
+  }
+}
+
+resource "aws_lb_listener" "backend" {
+  load_balancer_arn = aws_lb.backend.arn
+  port              = var.container_port
+  protocol          = "TCP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.backend.arn
+  }
+}
+
 resource "aws_ecs_task_definition" "backend" {
   family                   = var.service_name
   requires_compatibilities = ["FARGATE"]
@@ -120,9 +167,17 @@ resource "aws_ecs_service" "backend" {
   desired_count   = var.desired_count
   launch_type     = "FARGATE"
 
+  load_balancer {
+    target_group_arn = aws_lb_target_group.backend.arn
+    container_name   = var.container_name
+    container_port   = var.container_port
+  }
+
   network_configuration {
-    subnets          = data.aws_subnets.default.ids
+    subnets          = local.subnet_ids
     security_groups  = [aws_security_group.backend.id]
     assign_public_ip = true
   }
+
+  depends_on = [aws_lb_listener.backend]
 }
