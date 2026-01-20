@@ -3,7 +3,7 @@ export type ExtractResponse = {
   hang_tags: Array<Record<string, unknown>>;
 };
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
 
 export async function extractFiles(files: FileList | File[]): Promise<ExtractResponse> {
   const formData = new FormData();
