@@ -150,7 +150,7 @@ export default function App() {
 
   const sheetIndices = useMemo(() => {
     if (!sheetPreview) {
-      return { upc: -1, size: -1, color: -1 };
+      return { upc: -1, style: -1, size: -1, color: -1 };
     }
     const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
     const headers = sheetPreview.headers.map(normalize);
@@ -158,6 +158,7 @@ export default function App() {
       headers.findIndex((header) => candidates.some((candidate) => header.includes(candidate)));
     return {
       upc: findIndex(["carelabelupc", "careupc", "hangtagupc", "rfidupc", "upc"]),
+      style: 1,
       size: findIndex(["size"]),
       color: findIndex(["color"]),
     };
@@ -171,6 +172,7 @@ export default function App() {
       index >= 0 ? (row[index] ?? "").trim() : "";
     return sheetPreview.rows.map((row) => ({
       upc: getCell(row, sheetIndices.upc),
+      style: getCell(row, sheetIndices.style).toUpperCase(),
       size: getCell(row, sheetIndices.size).toUpperCase(),
       color: getCell(row, sheetIndices.color).toUpperCase(),
       row,
@@ -209,21 +211,11 @@ export default function App() {
     };
   }, [sheetPreview, sheetIndices]);
 
-  const extractedNormalized = useMemo(
-    () =>
-      mergedItems.map((item) => ({
-        upc: String(item.upc ?? ""),
-        size: String(item.size ?? "").toUpperCase(),
-        color: String(item.color ?? "").toUpperCase(),
-        item,
-      })),
-    [mergedItems]
-  );
-
   const careLabelsNormalized = useMemo(
     () =>
       extractState.data?.care_labels.map((item) => ({
         upc: String(item.upc ?? ""),
+        style: String(item.style_number ?? "").toUpperCase(),
         size: String(item.size ?? "").toUpperCase(),
         color: String(item.color ?? "").toUpperCase(),
       })) ?? [],
@@ -234,83 +226,94 @@ export default function App() {
     () =>
       extractState.data?.hang_tags.map((item) => ({
         upc: String(item.upc ?? ""),
+        style: String(item.style_number ?? "").toUpperCase(),
         size: String(item.size ?? "").toUpperCase(),
         color: String(item.color ?? "").toUpperCase(),
       })) ?? [],
     [extractState.data]
   );
 
-  const upcToSheetRows = useMemo(() => {
+  const makeKey = (style: string, size: string, color: string) =>
+    `${style}||${size}||${color}`;
+
+  const sheetKeyToRows = useMemo(() => {
     const map = new Map<string, typeof sheetRowsNormalized>();
     sheetRowsNormalized.forEach((row) => {
-      if (!row.upc) {
+      if (!row.style || !row.size || !row.color) {
         return;
       }
-      const list = map.get(row.upc) ?? [];
+      const key = makeKey(row.style, row.size, row.color);
+      const list = map.get(key) ?? [];
       list.push(row);
-      map.set(row.upc, list);
+      map.set(key, list);
     });
     return map;
   }, [sheetRowsNormalized]);
 
-  const upcToExtracted = useMemo(() => {
-    const map = new Map<string, typeof extractedNormalized>();
-    extractedNormalized.forEach((row) => {
-      if (!row.upc) {
-        return;
-      }
-      const list = map.get(row.upc) ?? [];
-      list.push(row);
-      map.set(row.upc, list);
-    });
-    return map;
-  }, [extractedNormalized]);
-
-  const upcToCareLabels = useMemo(() => {
+  const careLabelKeyToRows = useMemo(() => {
     const map = new Map<string, typeof careLabelsNormalized>();
     careLabelsNormalized.forEach((row) => {
-      if (!row.upc) {
+      if (!row.style || !row.size || !row.color) {
         return;
       }
-      const list = map.get(row.upc) ?? [];
+      const key = makeKey(row.style, row.size, row.color);
+      const list = map.get(key) ?? [];
       list.push(row);
-      map.set(row.upc, list);
+      map.set(key, list);
     });
     return map;
   }, [careLabelsNormalized]);
 
-  const upcToHangTags = useMemo(() => {
+  const hangTagKeyToRows = useMemo(() => {
     const map = new Map<string, typeof hangTagsNormalized>();
     hangTagsNormalized.forEach((row) => {
-      if (!row.upc) {
+      if (!row.style || !row.size || !row.color) {
         return;
       }
-      const list = map.get(row.upc) ?? [];
+      const key = makeKey(row.style, row.size, row.color);
+      const list = map.get(key) ?? [];
       list.push(row);
-      map.set(row.upc, list);
+      map.set(key, list);
     });
     return map;
   }, [hangTagsNormalized]);
 
   const matchStatus = (
     upc: string,
+    style: string,
     size: string,
     color: string,
-    otherRows: Array<{ size: string; color: string }>
+    otherRows: Array<{ upc: string }>
   ) => {
-    if (!upc) {
-      return { status: "missing", sizeMatch: false, colorMatch: false };
+    if (!style || !size || !color) {
+      console.warn("Validation missing required fields", {
+        style,
+        size,
+        color,
+        upc,
+      });
+      return { status: "missing", upcMatch: false };
     }
     if (otherRows.length === 0) {
-      return { status: "missing", sizeMatch: false, colorMatch: false };
+      console.warn("No rows matched style/size/color", {
+        style,
+        size,
+        color,
+        upc,
+      });
+      return { status: "missing", upcMatch: false };
     }
-    const exact = otherRows.find((row) => row.size === size && row.color === color);
-    if (exact) {
-      return { status: "match", sizeMatch: true, colorMatch: true };
+    const upcMatch = otherRows.some((row) => row.upc === upc);
+    if (!upcMatch) {
+      console.warn("UPC mismatch for matching style/size/color", {
+        style,
+        size,
+        color,
+        upc,
+        matchedUpcs: otherRows.map((row) => row.upc).filter(Boolean),
+      });
     }
-    const sizeMatch = otherRows.some((row) => row.size === size);
-    const colorMatch = otherRows.some((row) => row.color === color);
-    return { status: "mismatch", sizeMatch, colorMatch };
+    return { status: upcMatch ? "match" : "mismatch", upcMatch };
   };
 
   const rowFill = (status: "missing" | "mismatch" | "match") => {
@@ -322,8 +325,6 @@ export default function App() {
     }
     return "FFF4E5";
   };
-
-  const mismatchFill = "F9CACA";
 
   const applyCellStyle = (worksheet: any, cellAddress: string, fillColor: string) => {
     const cell = worksheet[cellAddress];
@@ -348,24 +349,20 @@ export default function App() {
     ]);
     const sheet = XLSXStyle.utils.aoa_to_sheet([headers, ...rows]);
     rows.forEach((row, index) => {
+      const style = String(row[1] ?? "").toUpperCase();
+      const size = String(row[2] ?? "").toUpperCase();
+      const color = String(row[3] ?? "").toUpperCase();
       const status = matchStatus(
         String(row[4] ?? ""),
-        String(row[2] ?? "").toUpperCase(),
-        String(row[3] ?? "").toUpperCase(),
-        upcToSheetRows.get(String(row[4] ?? "")) ?? []
+        style,
+        size,
+        color,
+        sheetKeyToRows.get(makeKey(style, size, color)) ?? []
       );
       const fill = rowFill(status.status as "missing" | "mismatch" | "match");
       for (let c = 0; c < headers.length; c += 1) {
         const addr = XLSXStyle.utils.encode_cell({ r: index + 1, c });
         applyCellStyle(sheet, addr, fill);
-      }
-      if (status.status === "mismatch") {
-        if (!status.sizeMatch) {
-          applyCellStyle(sheet, XLSXStyle.utils.encode_cell({ r: index + 1, c: 2 }), mismatchFill);
-        }
-        if (!status.colorMatch) {
-          applyCellStyle(sheet, XLSXStyle.utils.encode_cell({ r: index + 1, c: 3 }), mismatchFill);
-        }
       }
     });
     const workbook = XLSXStyle.utils.book_new();
@@ -383,27 +380,29 @@ export default function App() {
     const rows = sheetRowsNormalized.map((row, index) => {
       const careStatus = matchStatus(
         row.upc,
+        row.style,
         row.size,
         row.color,
-        upcToCareLabels.get(row.upc) ?? []
+        careLabelKeyToRows.get(makeKey(row.style, row.size, row.color)) ?? []
       );
       const hangStatus = matchStatus(
         row.upc,
+        row.style,
         row.size,
         row.color,
-        upcToHangTags.get(row.upc) ?? []
+        hangTagKeyToRows.get(makeKey(row.style, row.size, row.color)) ?? []
       );
       const careLabel =
         careStatus.status === "match"
-          ? "Match"
+          ? "UPC Matched"
           : careStatus.status === "mismatch"
-          ? "Mismatch"
+          ? "UPC Mismatched"
           : "Not found";
       const hangTag =
         hangStatus.status === "match"
-          ? "Match"
+          ? "UPC Matched"
           : hangStatus.status === "mismatch"
-          ? "Mismatch"
+          ? "UPC Mismatched"
           : "Not found";
       return [...(baseRows[index] ?? []), careLabel, hangTag];
     });
@@ -411,15 +410,29 @@ export default function App() {
     rows.forEach((row, index) => {
       const careStatus = matchStatus(
         sheetRowsNormalized[index].upc,
+        sheetRowsNormalized[index].style,
         sheetRowsNormalized[index].size,
         sheetRowsNormalized[index].color,
-        upcToCareLabels.get(sheetRowsNormalized[index].upc) ?? []
+        careLabelKeyToRows.get(
+          makeKey(
+            sheetRowsNormalized[index].style,
+            sheetRowsNormalized[index].size,
+            sheetRowsNormalized[index].color
+          )
+        ) ?? []
       );
       const hangStatus = matchStatus(
         sheetRowsNormalized[index].upc,
+        sheetRowsNormalized[index].style,
         sheetRowsNormalized[index].size,
         sheetRowsNormalized[index].color,
-        upcToHangTags.get(sheetRowsNormalized[index].upc) ?? []
+        hangTagKeyToRows.get(
+          makeKey(
+            sheetRowsNormalized[index].style,
+            sheetRowsNormalized[index].size,
+            sheetRowsNormalized[index].color
+          )
+        ) ?? []
       );
       const careFill = rowFill(careStatus.status as "missing" | "mismatch" | "match");
       const hangFill = rowFill(hangStatus.status as "missing" | "mismatch" | "match");
@@ -478,15 +491,17 @@ export default function App() {
               {sheetRowsNormalized.map((row, rowIndex) => {
                 const careStatus = matchStatus(
                   row.upc,
+                  row.style,
                   row.size,
                   row.color,
-                  upcToCareLabels.get(row.upc) ?? []
+                  careLabelKeyToRows.get(makeKey(row.style, row.size, row.color)) ?? []
                 );
                 const hangStatus = matchStatus(
                   row.upc,
+                  row.style,
                   row.size,
                   row.color,
-                  upcToHangTags.get(row.upc) ?? []
+                  hangTagKeyToRows.get(makeKey(row.style, row.size, row.color)) ?? []
                 );
                 return (
                   <tr key={`row-${rowIndex}`}>
@@ -500,16 +515,16 @@ export default function App() {
                     ))}
                     <td className={`row-${careStatus.status}`}>
                       {careStatus.status === "match"
-                        ? "Match"
+                        ? "UPC Matched"
                         : careStatus.status === "mismatch"
-                        ? "Mismatch"
+                        ? "UPC Mismatched"
                         : "Not found"}
                     </td>
                     <td className={`row-${hangStatus.status}`}>
                       {hangStatus.status === "match"
-                        ? "Match"
+                        ? "UPC Matched"
                         : hangStatus.status === "mismatch"
-                        ? "Mismatch"
+                        ? "UPC Mismatched"
                         : "Not found"}
                     </td>
                   </tr>
