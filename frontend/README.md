@@ -20,3 +20,6 @@ To point to a different backend, create `frontend/.env`:
 ```bash
 VITE_API_BASE=https://your-backend-host
 ```
+
+For Vercel, set `VITE_API_BASE=/api` and use the rewrite in `frontend/vercel.json`
+to proxy to the backend (avoids mixed-content errors).
